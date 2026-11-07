@@ -1,0 +1,151 @@
+// Game view: runs the prepared build inside a sandboxed iframe with the shim.
+/* global __RUNNER_SHIM__ */
+import { h, icons, clear } from './dom.js';
+
+const SHIM = typeof __RUNNER_SHIM__ !== 'undefined' ? __RUNNER_SHIM__ : '';
+let vendorManifest = null;
+
+async function loadVendor(name) {
+  if (!vendorManifest) {
+    const r = await fetch('vendor/manifest.json');
+    if (!r.ok) throw new Error('runtime manifest missing');
+    vendorManifest = await r.json();
+  }
+  const list = vendorManifest[name] || [];
+  const out = {};
+  await Promise.all(list.map(async (f) => {
+    const r = await fetch(`vendor/${name}/${f}`);
+    if (!r.ok) throw new Error(`could not load ${name}/${f}`);
+    out[`__vendor/${name}/${f}`] = await r.blob();
+  }));
+  return out;
+}
+
+function storageKey(name) { return 'rsf-save:' + name; }
+function loadSaves(name) {
+  try { return JSON.parse(localStorage.getItem(storageKey(name)) || '{}'); } catch { return {}; }
+}
+function storeSaves(name, data) {
+  try { localStorage.setItem(storageKey(name), JSON.stringify(data)); } catch { /* storage full or blocked */ }
+}
+
+export class GameView {
+  constructor(app) {
+    this.app = app;
+    this.iframe = null;
+    this.running = false;
+    this.status = h('span', { class: 'muted' }, 'Not running');
+    this.stage = h('div', { class: 'game-stage' });
+    this.overlay = h('div', { class: 'game-overlay' });
+    this.stage.appendChild(this.overlay);
+    this.btnRestart = h('button', { class: 'btn sm', onclick: () => this.start(), title: 'Rebuild with your edits and restart' }, h('span', { html: icons.rebuild }), 'Restart');
+    this.btnStop = h('button', { class: 'btn sm', onclick: () => this.stop(), disabled: true }, h('span', { html: icons.stop }), 'Stop');
+    this.btnFull = h('button', { class: 'btn sm', onclick: () => this.fullscreen(), disabled: true }, h('span', { html: icons.expand }), 'Fullscreen');
+    this.bar = h('div', { class: 'view-bar' }, h('span', { class: 'path' }, 'Game'), this.status, this.btnRestart, this.btnStop, this.btnFull);
+    this.el = [this.bar, this.stage];
+    this.onMessage = (e) => this.message(e);
+    window.addEventListener('message', this.onMessage);
+    this.idle();
+  }
+
+  idle(title = 'Press Play to run the game', text = 'ReSourcefy rebuilds the game from the files in the Project and Build folders, including your edits, and runs it here in a sandbox.') {
+    clear(this.overlay);
+    this.overlay.append(h('h3', null, title), h('p', null, text));
+    const r = this.app.project && this.app.project.runnable;
+    if (r) this.overlay.append(h('button', { class: 'btn primary', onclick: () => this.start() }, h('span', { html: icons.play }), 'Play ' + (r.label || '')));
+    this.overlay.hidden = false;
+  }
+
+  async start() {
+    this.stop(true);
+    this.app.setRunning(true);
+    this.status.textContent = 'Preparing build…';
+    clear(this.overlay);
+    this.overlay.append(h('h3', null, 'Building…'), h('p', null, 'Collecting files and applying your edits.'));
+    this.overlay.hidden = false;
+    let run;
+    try {
+      await this.app.saveAllTabs();
+      run = await this.app.engine.call('prepareRun', {});
+    } catch (e) {
+      this.fail('Could not prepare the game: ' + e.message);
+      return;
+    }
+    if (!run || !run.files) {
+      this.fail(run && run.reason ? run.reason : 'This build has no web version that can run in the browser.', true);
+      return;
+    }
+    let files = run.files;
+    try {
+      for (const v of run.vendor || []) Object.assign(files, await loadVendor(v));
+    } catch (e) {
+      this.fail('A bundled runtime failed to load: ' + e.message);
+      return;
+    }
+    this.run = run;
+    const iframe = h('iframe', {
+      title: 'Game',
+      sandbox: 'allow-scripts allow-pointer-lock allow-forms allow-modals allow-popups allow-orientation-lock',
+      allow: 'fullscreen; autoplay; gamepad; accelerometer; gyroscope; clipboard-write',
+      allowfullscreen: true,
+    });
+    const shim = SHIM.replace(/<\/script/gi, '<\\/script');
+    iframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000;color:#ccc;font:13px system-ui}</style><script>${shim}</script></head><body></body></html>`;
+    this.iframe = iframe;
+    this.pendingFiles = files;
+    this.stage.insertBefore(iframe, this.overlay);
+    this.status.textContent = `Starting ${run.label || 'game'}…`;
+    this.running = true;
+    this.btnStop.disabled = false;
+    this.btnFull.disabled = false;
+    this.app.log('info', `Running ${run.label || 'game'} (${Object.keys(files).length} files)`);
+    if (run.notes) for (const n of run.notes) this.app.log('warn', n);
+  }
+
+  message(e) {
+    if (!this.iframe || e.source !== this.iframe.contentWindow) return;
+    const m = e.data;
+    if (!m || !m.__rsf) return;
+    if (m.type === 'hello') {
+      const name = this.app.project ? this.app.project.name : 'game';
+      this.iframe.contentWindow.postMessage({ __rsf: true, type: 'boot', files: this.pendingFiles, entry: this.run.entry, storage: loadSaves(name) }, '*');
+    } else if (m.type === 'started') {
+      this.overlay.hidden = true;
+      this.status.textContent = 'Running';
+      try { this.iframe.focus(); } catch { /* ignore */ }
+    } else if (m.type === 'log') {
+      this.app.log(m.level, m.msg, 'game');
+    } else if (m.type === 'storage') {
+      storeSaves(this.app.project ? this.app.project.name : 'game', m.data);
+    } else if (m.type === 'failed') {
+      this.fail(m.msg);
+    }
+  }
+
+  fail(msg, info = false) {
+    this.stop(true);
+    this.idle(info ? 'Not playable here' : 'The game could not start', msg);
+    this.status.textContent = info ? 'Not playable' : 'Failed';
+    if (!info) this.app.log('error', msg);
+  }
+
+  stop(silent) {
+    if (this.iframe) { this.iframe.remove(); this.iframe = null; }
+    this.running = false;
+    this.btnStop.disabled = true;
+    this.btnFull.disabled = true;
+    this.app.setRunning(false);
+    if (!silent) { this.status.textContent = 'Stopped'; this.idle('Stopped', 'Press Play to run the game again. Edits you saved are included.'); }
+  }
+
+  fullscreen() {
+    const el = this.stage;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) Promise.resolve(req.call(el)).catch(() => this.app.toast('Fullscreen is not available in this view.'));
+  }
+
+  destroy() {
+    this.stop(true);
+    window.removeEventListener('message', this.onMessage);
+  }
+}
