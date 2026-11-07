@@ -39,6 +39,7 @@
     "fzstd": "0.1.1",
     "js-beautify": "1.15.4",
     "love.js": "11.4.1",
+    "texture2ddecoder-wasm": "1.2.5",
     "three": "0.186.1"
   }
 }

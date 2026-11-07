@@ -48,11 +48,12 @@ async function expandContainers(ctx) {
       ctx.progress(`Scanning files (${processed.toLocaleString()})`, processed / (processed + total()));
       await ctx.yield();
     }
-    if (e.noExpand) continue;
+    if (e.noExpand || e.expanded) continue;
     const t = await typeEntry(ctx, e);
     if (depth >= MAX_DEPTH || ctx.vfs.map.size > MAX_ENTRIES) continue;
     const handler = containers.find((c) => c.kinds.includes(t.kind) && (!c.match || c.match(e, ctx)));
     if (!handler) continue;
+    e.expanded = true;
     try {
       const before = new Set(ctx.vfs.map.keys());
       await handler.expand(ctx, e);

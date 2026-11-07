@@ -27,8 +27,12 @@ import * as FakeIDB from 'fake-indexeddb';
       else if (logBudget === -1) post({ type: 'log', level: 'warn', msg: 'Game console output truncated (too many messages).' });
     };
   }
-  window.addEventListener('error', (e) => post({ type: 'log', level: 'error', msg: `${e.message || 'Error'}${e.filename ? ` (${e.filename.replace(/^blob:[^ ]*/, 'script')}:${e.lineno})` : ''}` }));
-  window.addEventListener('unhandledrejection', (e) => post({ type: 'log', level: 'error', msg: 'Unhandled promise rejection: ' + fmt(e.reason) }));
+  // document.open() erases window listeners, so the written page re-installs these first.
+  window.__rsfReinstall = () => {
+    window.addEventListener('error', (e) => post({ type: 'log', level: 'error', msg: `${e.message || 'Error'}${e.filename ? ` (${e.filename.replace(/^blob:[^ ]*/, 'script')}:${e.lineno})` : ''}` }));
+    window.addEventListener('unhandledrejection', (e) => post({ type: 'log', level: 'error', msg: 'Unhandled promise rejection: ' + fmt(e.reason) }));
+  };
+  window.__rsfReinstall();
 
   // The artifact viewer blocks native dialogs; keep games from stalling on them.
   window.alert = (m) => { console.info('[alert] ' + m); };
@@ -66,8 +70,38 @@ import * as FakeIDB from 'fake-indexeddb';
       const st = makeStorage(name === 'localStorage' ? saved : {}, name === 'localStorage');
       try { Object.defineProperty(window, name, { configurable: true, enumerable: true, get: () => st }); } catch (e) { console.warn('storage polyfill failed', e); }
     }
+    // In an opaque-origin sandbox, reading indexedDB works but open() throws; probe for real.
     let idbOk = false;
-    try { idbOk = !!window.indexedDB; } catch { idbOk = false; }
+    try {
+      const req = window.indexedDB.open('__rsf_probe');
+      req.onsuccess = () => { try { req.result.close(); window.indexedDB.deleteDatabase('__rsf_probe'); } catch { /* ignore */ } };
+      req.onerror = () => {};
+      idbOk = true;
+    } catch { idbOk = false; }
+    let cachesOk = false;
+    try { cachesOk = !!window.caches && typeof window.caches.open === 'function'; } catch { cachesOk = false; }
+    if (!cachesOk) {
+      const keyOf = (r) => (typeof r === 'string' ? r : r && r.url) || String(r);
+      class MemCache {
+        constructor() { this.m = new Map(); }
+        async match(r) { const v = this.m.get(keyOf(r)); return v ? v.clone() : undefined; }
+        async matchAll(r) { if (!r) return [...this.m.values()].map((v) => v.clone()); const v = await this.match(r); return v ? [v] : []; }
+        async put(r, res) { this.m.set(keyOf(r), res.clone()); }
+        async add(r) { const res = await fetch(r); await this.put(r, res); }
+        async addAll(rs) { for (const r of rs) await this.add(r); }
+        async delete(r) { return this.m.delete(keyOf(r)); }
+        async keys() { return [...this.m.keys()].map((u) => new Request(u)); }
+      }
+      const stores = new Map();
+      const cacheStorage = {
+        async open(n) { if (!stores.has(n)) stores.set(n, new MemCache()); return stores.get(n); },
+        async has(n) { return stores.has(n); },
+        async delete(n) { return stores.delete(n); },
+        async keys() { return [...stores.keys()]; },
+        async match(r) { for (const c of stores.values()) { const v = await c.match(r); if (v) return v; } return undefined; },
+      };
+      try { Object.defineProperty(window, 'caches', { configurable: true, enumerable: true, get: () => cacheStorage }); } catch { /* ignore */ }
+    }
     if (!idbOk) {
       const defs = { indexedDB: FakeIDB.indexedDB };
       for (const k of ['IDBKeyRange', 'IDBDatabase', 'IDBObjectStore', 'IDBIndex', 'IDBCursor', 'IDBCursorWithValue', 'IDBTransaction', 'IDBRequest', 'IDBOpenDBRequest', 'IDBVersionChangeEvent', 'IDBFactory']) defs[k] = FakeIDB[k];
@@ -226,6 +260,20 @@ import * as FakeIDB from 'fake-indexeddb';
 
   // ---------------- API patches ----------------
   function patchAll() {
+    // In about:srcdoc, location.href can't be a base for relative URLs; use the game's virtual folder.
+    const OrigURL = window.URL;
+    const fixBase = (b) => {
+      if (b === undefined || b === null) return b;
+      const bs = String(b);
+      return /^(about:|blob:null|null$|data:)/.test(bs) ? VBASE + entryDir : b;
+    };
+    class GameURL extends OrigURL {
+      constructor(url, base) {
+        if (arguments.length > 1) super(url, fixBase(base));
+        else super(url);
+      }
+    }
+    try { window.URL = GameURL; } catch { /* ignore */ }
     const origFetch = window.fetch.bind(window);
     window.fetch = function (input, init) {
       const url = typeof input === 'string' || input instanceof URL ? String(input) : input && input.url;
@@ -422,6 +470,9 @@ import * as FakeIDB from 'fake-indexeddb';
       }
     }
     for (const el of doc.querySelectorAll('img[srcset],source[srcset]')) el.removeAttribute('srcset');
+    const boot = doc.createElement('script');
+    boot.textContent = 'window.__rsfReinstall&&window.__rsfReinstall()';
+    doc.head.insertBefore(boot, doc.head.firstChild);
     const dt = doc.doctype ? '<!DOCTYPE html>' : '';
     return dt + doc.documentElement.outerHTML;
   }

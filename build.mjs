@@ -74,6 +74,11 @@ mkdirSync(join(vendor, 'love'), { recursive: true });
 for (const f of ['love.js', 'love.wasm']) cpSync(join(loveDir, f), join(vendor, 'love', f));
 cpSync(join(root, 'node_modules/love.js/LICENSE'), join(vendor, 'love', 'LICENSE.txt'));
 
+// Texture2DDecoder (WebAssembly) for ETC/EAC/ASTC/PVRTC/ATC/crunch textures.
+mkdirSync(join(vendor, 't2d'), { recursive: true });
+for (const f of ['texture2ddecoder.js', 'texture2ddecoder.wasm']) cpSync(join(root, 'node_modules/texture2ddecoder-wasm/wasm', f), join(vendor, 't2d', f));
+cpSync(join(root, 'node_modules/texture2ddecoder-wasm/LICENSE'), join(vendor, 't2d', 'LICENSE.txt'));
+
 // Which runtime files the game runner must hand to the sandboxed iframe.
 writeFileSync(join(vendor, 'manifest.json'), JSON.stringify({
   ruffle: readdirSync(join(vendor, 'ruffle')).filter((f) => !f.startsWith('LICENSE')),
@@ -86,8 +91,10 @@ if (existsSync(dataDir)) {
   for (const f of readdirSync(dataDir)) {
     const buf = readFileSync(join(dataDir, f));
     if (/\.(txt|md)$/i.test(f)) { writeFileSync(join(dist, 'data', f), buf); continue; }
-    // Ship compressed; the engine inflates with the browser's DecompressionStream.
-    writeFileSync(join(dist, 'data', f + '.gz'), gzipSync(buf, { level: 9 }));
+    // The artifact host only serves standard web types, so binary tables ship as
+    // gzip+base64 inside a script the engine loads with importScripts when needed.
+    const b64 = gzipSync(buf, { level: 9 }).toString('base64');
+    writeFileSync(join(dist, 'data', f + '.js'), `(self.RSF_DATA=self.RSF_DATA||{})[${JSON.stringify(f)}]=${JSON.stringify(b64)};\n`);
   }
 }
 
