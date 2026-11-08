@@ -158,6 +158,7 @@ export async function openFile(ctx, path, opts = {}) {
   const base = {
     path: e.path, name: e.name, size: e.size, kind: e.kind, label: t.label, origin: e.origin,
     modified: e.modified, editable: true, lang: e.lang, view: e.view, related: e.related || null,
+    replaceable: !e.readonlyReason, readonlyReason: e.readonlyReason || null,
   };
   const conv = !opts.raw && (converters[e.kind] || (e.convert ? e.convert : null));
   if (conv) {
@@ -201,7 +202,8 @@ export async function inspectFile(ctx, path) {
     ['Size', e.size == null ? 'generated on open' : e.size.toLocaleString() + ' bytes'],
     ['Origin', { build: 'Uploaded file', extracted: 'Unpacked from ' + (e.source || 'container'), recovered: 'Recovered by ReSourcefy', generated: 'Generated' }[e.origin] || e.origin],
   ];
-  if (e.modified) rows.push(['Status', 'Modified (unsaved to build)']);
+  if (e.modified) rows.push(['Status', 'Edited: used when you press Play or Export']);
+  if (e.readonlyReason) rows.push(['Note', e.readonlyReason]);
   return { path: e.path, rows, meta: e.meta || null, kind: e.kind, view: e.view, actions: e.actions || [] };
 }
 

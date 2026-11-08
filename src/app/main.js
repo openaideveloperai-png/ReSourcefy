@@ -425,12 +425,12 @@ class App {
       await this.writeFile(file.path, await picked[0].blob.arrayBuffer());
       this.tabs.close(tab.id);
       this.openFile(file.path);
-      this.toast('Replaced. Press Play to test it.');
+      this.toast('Replaced. Press Play (or Restart) to see it in the game.');
     };
     switch (file.view) {
       case 'code': return this.codeViewer(tab, file);
-      case 'image': return imageViewer(file, { onReplace: file.converted ? null : replace('image/*') });
-      case 'audio': return audioViewer(file, { onReplace: file.converted ? null : replace('audio/*') });
+      case 'image': return imageViewer(file, { onReplace: file.converted || file.replaceable === false ? null : replace('image/*') });
+      case 'audio': return audioViewer(file, { onReplace: file.converted || file.replaceable === false ? null : replace('audio/*') });
       case 'video': return videoViewer(file);
       case 'font': return fontViewer(file);
       case 'model': return this.lazyModel(file);

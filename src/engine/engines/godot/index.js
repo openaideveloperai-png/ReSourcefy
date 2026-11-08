@@ -293,6 +293,7 @@ export default {
       const e = ctx.recover(res, data, opts);
       st.recovered.set(e.path, { res, ...(opts.godot || {}) });
       e.godot = opts.godot || { res };
+      if (opts.readonlyReason) e.readonlyReason = opts.readonlyReason;
       return e;
     };
     const skipped = new Set();
@@ -352,11 +353,12 @@ export default {
           producer: async () => { const a = await audioFromResource(await bytesOf(ctx, te)); return new Blob([a.data], { type: a.mime }); },
           meta: { Source: 'res://' + target, Importer: importer },
           godot: { res: src, kind: 'audio', target },
+          readonlyReason: "Exported Godot games play the imported copy of a sound, so replacing it here doesn't change the game yet.",
         });
       } else if (/font/i.test(importer)) {
-        recover(src, null, { view: 'font', kind: 'font', producer: async () => fontFromResource(await bytesOf(ctx, te)), meta: { Source: 'res://' + target }, godot: { res: src, kind: 'font', target } });
+        recover(src, null, { view: 'font', kind: 'font', producer: async () => fontFromResource(await bytesOf(ctx, te)), meta: { Source: 'res://' + target }, godot: { res: src, kind: 'font', target }, readonlyReason: "Exported Godot games use the imported copy of a font, so changing it here doesn't change the game yet." });
       } else if (/scene/i.test(importer) && /\.scn$/.test(target)) {
-        recover(src + '.tscn', null, { view: 'code', lang: 'ini', kind: 'godot-text', producer: async () => resourceText(parseResource(await bytesOf(ctx, te))), meta: { Source: 'res://' + target, Note: 'Imported 3D scene in text form' }, godot: { res: src + '.tscn', kind: 'imported', target } });
+        recover(src + '.tscn', null, { view: 'code', lang: 'ini', kind: 'godot-text', producer: async () => resourceText(parseResource(await bytesOf(ctx, te))), meta: { Source: 'res://' + target, Note: 'Imported 3D scene in text form' }, godot: { res: src + '.tscn', kind: 'imported', target }, readonlyReason: 'This is a readable copy of an imported 3D scene; the game keeps using the imported original.' });
       }
     }
     // everything else

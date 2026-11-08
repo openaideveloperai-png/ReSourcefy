@@ -322,7 +322,11 @@ export default {
           default: ext = '.json'; view = 'code'; lang = 'json'; producer = async () => { const [s, ob] = await get(); return objectJSON(s, ob); };
         }
         const entry = ctx.recover(base + ext, null, { producer, view, lang, kind: view === 'image' ? 'png' : view === 'audio' ? 'audio' : view === 'model' ? 'obj' : view === 'font' ? 'font' : view === 'video' ? 'mp4' : 'text', meta: { 'Unity class': sf.className(o.classId), 'Path ID': String(o.pathId), 'Source file': sf.name } });
-        if (entry) { entry.unity = { file: sf.entry.path, pathId: o.pathId, classId: o.classId }; made++; }
+        if (entry) {
+          entry.unity = { file: sf.entry.path, pathId: o.pathId, classId: o.classId };
+          if (![28, 213, 49].includes(o.classId)) entry.readonlyReason = `Changes to Unity ${dir} assets aren't written back into the game yet; textures, sprites and text assets are.`;
+          made++;
+        }
       }
     }
     if (made > MAX_ASSETS) ctx.note('info', `Only the first ${MAX_ASSETS.toLocaleString()} assets were listed.`);
