@@ -3,19 +3,18 @@ import { h, icons, formatBytes, copyText } from './dom.js';
 
 export const SUPPORT = [
   ['Unity', 'WebGL, Windows, macOS, Linux, Android', 'C# from Mono DLLs · IL2CPP class dump (v24–v31+) · scenes, textures, audio, meshes, text', 'WebGL builds', 'Text, strings, assets'],
-  ['Godot', '3.x and 4.x, .pck or embedded in .exe', 'GDScript from bytecode · binary scenes to .tscn · textures, audio, project settings', 'Web exports', 'Scripts & scenes, repacked .pck'],
-  ['GameMaker', 'data.win / game.unx / game.droid, HTML5', 'GML decompiler · sprites, backgrounds, rooms, sounds, fonts', 'HTML5 exports', 'Strings, HTML5 code'],
-  ['RPG Maker', 'MV, MZ, XP, VX, VX Ace', 'JavaScript plugins · maps, events, database as JSON · Ruby scripts · decrypted images and audio', 'MV & MZ', 'Data, plugins, assets'],
-  ['Unreal Engine', '4 & 5, .pak / IoStore', 'Package listing · asset names, imports, exports · config files', '—', 'Export edited files'],
-  ["Ren'Py", '.rpa archives, .rpyc', 'Scripts (.rpy) · images, audio', '—', 'Export edited files'],
+  ['Godot', '3.x and 4.x, .pck or embedded in the executable', 'GDScript from compiled scripts · binary scenes to .tscn · textures, audio, fonts, project settings', 'Yes (Godot 3.6, 4.4, 4.7 runtimes)', 'Scripts, scenes, images, settings → rebuilt .pck'],
+  ['GameMaker', 'data.win, game.unx, game.ios, game.droid', 'Texture pages, sprite frames, tilesets, sounds, strings · list of objects, rooms and scripts (code not decompiled yet)', 'HTML5 exports', 'Export edited files'],
+  ['RPG Maker', 'MV, MZ · XP, VX, VX Ace archives', 'JavaScript plugins · maps, events and database as JSON · decrypted images and audio · RGSS archive contents', 'MV & MZ', 'Data, plugins, images, audio'],
+  ["Ren'Py", '.rpa archives, game folder', 'Scripts (.rpy), images, audio · compiled .rpyc are listed, not decompiled', 'Web builds', 'Export edited files'],
   ['HTML5 engines', 'Construct, Phaser, GDevelop, PlayCanvas, Cocos, Defold, PixiJS, Three.js…', 'Readable JavaScript (formatter) · all assets', 'Yes', 'Anything, then play'],
-  ['Flash', '.swf', 'Images, sounds, ActionScript class list', 'Yes (Ruffle)', '—'],
-  ['LÖVE', '.love or fused .exe', 'Lua source', 'Yes (love.js)', 'Lua, assets'],
-  ['.NET games', 'XNA, FNA, MonoGame, any managed .dll/.exe', 'C# decompiler with IL view', '—', 'Export'],
-  ['Everything else', 'zip, apk, ipa, jar, asar, gz, br, zst, lz4, xp3, wad, vpk, wasm, luac, class…', 'Unpacks containers · WebAssembly, Lua and Java disassembly · hex view', 'HTML builds', 'Text & assets'],
+  ['Flash', '.swf', 'Images, sounds, embedded files, ActionScript 3 class outlines', 'Yes (Ruffle)', 'Files the movie loads'],
+  ['LÖVE', '.love, fused .exe or folder', 'Lua source and assets', 'Yes (love.js, LÖVE 11)', 'Lua and assets, then play'],
+  ['.NET games', 'XNA, FNA, MonoGame, any managed .dll/.exe', 'C# decompiler (lambdas, coroutines, foreach…) with IL view', '—', 'Export'],
+  ['Everything else', 'zip, apk, ipa, jar, asar, rpa, gz, br, zst, lz4, wasm…', 'Unpacks archives · WebAssembly summary · hex view for anything', 'HTML builds', 'Text & assets'],
 ];
 
-const ENGINES = ['Unity', 'Godot', 'GameMaker', 'Unreal', 'RPG Maker', "Ren'Py", 'Construct', 'Phaser', 'GDevelop', 'PlayCanvas', 'Cocos', 'Defold', 'Flash', 'LÖVE', 'MonoGame', 'PICO-8'];
+const ENGINES = ['Unity', 'Godot', 'GameMaker', 'RPG Maker', "Ren'Py", 'Construct', 'Phaser', 'GDevelop', 'PlayCanvas', 'Cocos', 'Defold', 'Flash', 'LÖVE', 'MonoGame', 'PICO-8'];
 
 export function overviewView(app) {
   const root = h('div', { class: 'view-body' });
@@ -31,7 +30,7 @@ function dropzone(app, compact) {
     h('h2', null, compact ? 'Analyze another game' : 'Drop a game here to turn it back into a project'),
     h('p', null, compact
       ? 'Drop a folder, an executable, or an archive. Everything runs in this page; nothing is uploaded.'
-      : 'Drop the whole game folder, a build archive (zip, apk, pck, pak…) or single files like .wasm, .dll, .data.gz or .br. ReSourcefy detects the engine, unpacks everything, recovers scripts and assets, and lets you play and edit web builds. Files never leave your browser.'),
+      : 'Drop the whole game folder, a build archive (zip, apk, pck, rpa…) or single files like .wasm, .dll, .data.gz or .unityweb. ReSourcefy detects the engine, unpacks everything, recovers scripts and assets, and lets you edit and play the game. Files never leave your browser.'),
     h('div', { class: 'dz-actions' },
       h('button', { class: 'btn primary', onclick: () => app.pick({ directory: true }) }, h('span', { html: icons.folder }), 'Open game folder'),
       h('button', { class: 'btn', onclick: () => app.pick({ directory: false }) }, h('span', { html: icons.file }), 'Open files'),
