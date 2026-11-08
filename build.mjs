@@ -79,10 +79,29 @@ mkdirSync(join(vendor, 't2d'), { recursive: true });
 for (const f of ['texture2ddecoder.js', 'texture2ddecoder.wasm']) cpSync(join(root, 'node_modules/texture2ddecoder-wasm/wasm', f), join(vendor, 't2d', f));
 cpSync(join(root, 'node_modules/texture2ddecoder-wasm/LICENSE'), join(vendor, 't2d', 'LICENSE.txt'));
 
+// Godot web runtimes (fetched by tools/fetch-godot-runtimes.mjs into vendor/godot).
+const godotSrc = join(root, 'vendor/godot');
+const godotRuntimes = {};
+if (existsSync(godotSrc)) {
+  for (const id of readdirSync(godotSrc)) {
+    const dir = join(godotSrc, id);
+    if (!id.startsWith('godot-') || !statSync(dir).isDirectory()) continue;
+    mkdirSync(join(vendor, id), { recursive: true });
+    const list = [];
+    for (const f of readdirSync(dir)) {
+      cpSync(join(dir, f), join(vendor, id, f));
+      if (/\.(js|wasm)$/.test(f)) list.push(f);
+    }
+    for (const f of ['LICENSE.txt', 'COPYRIGHT.txt']) if (existsSync(join(godotSrc, f))) cpSync(join(godotSrc, f), join(vendor, id, f));
+    godotRuntimes[id] = list;
+  }
+} else console.warn('vendor/godot missing: run `node tools/fetch-godot-runtimes.mjs` to bundle the Godot web runtimes');
+
 // Which runtime files the game runner must hand to the sandboxed iframe.
 writeFileSync(join(vendor, 'manifest.json'), JSON.stringify({
   ruffle: readdirSync(join(vendor, 'ruffle')).filter((f) => !f.startsWith('LICENSE')),
   love: ['love.js', 'love.wasm'],
+  ...godotRuntimes,
 }, null, 1));
 
 const dataDir = join(root, 'src/data');

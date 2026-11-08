@@ -3,3 +3,4 @@ dist/
 test/samples/
 *.log
 .DS_Store
+vendor/godot/

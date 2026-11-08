@@ -5,7 +5,11 @@ import { h, icons, clear } from './dom.js';
 const SHIM = typeof __RUNNER_SHIM__ !== 'undefined' ? __RUNNER_SHIM__ : '';
 let vendorManifest = null;
 
-async function loadVendor(name) {
+// v: a runtime name, or { name, dir, rename: { from: to } } to place its files elsewhere
+async function loadVendor(v) {
+  const name = typeof v === 'string' ? v : v.name;
+  const dir = typeof v === 'string' || v.dir == null ? `__vendor/${name}/` : v.dir;
+  const rename = (f) => { if (typeof v !== 'string' && v.rename) for (const [a, b] of Object.entries(v.rename)) if (f.startsWith(a)) return b + f.slice(a.length); return f; };
   if (!vendorManifest) {
     const r = await fetch('vendor/manifest.json');
     if (!r.ok) throw new Error('runtime manifest missing');
@@ -16,7 +20,12 @@ async function loadVendor(name) {
   await Promise.all(list.map(async (f) => {
     const r = await fetch(`vendor/${name}/${f}`);
     if (!r.ok) throw new Error(`could not load ${name}/${f}`);
-    out[`__vendor/${name}/${f}`] = await r.blob();
+    // *.gz.wasm: a gzip-compressed WebAssembly module (keeps the bundle small)
+    if (f.endsWith('.gz.wasm')) {
+      const stream = r.body.pipeThrough(new DecompressionStream('gzip'));
+      const buf = await new Response(stream).arrayBuffer();
+      out[dir + rename(f.replace('.gz.wasm', '.wasm'))] = new Blob([buf], { type: 'application/wasm' });
+    } else out[dir + rename(f)] = await r.blob();
   }));
   return out;
 }

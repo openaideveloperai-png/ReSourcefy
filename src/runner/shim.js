@@ -360,15 +360,26 @@ import * as FakeIDB from 'fake-indexeddb';
       window.FontFace.prototype = OrigFontFace.prototype;
     }
     const OrigWorker = window.Worker;
+    // Audio worklets (Godot, Emscripten audio) load modules by URL too.
+    if (window.AudioWorklet && AudioWorklet.prototype.addModule) {
+      const addModule = AudioWorklet.prototype.addModule;
+      AudioWorklet.prototype.addModule = function (url, opts) { return addModule.call(this, mapUrl(url), opts); };
+    }
     window.Worker = function (url, opts) {
       const p = resolve(url);
       if (!p) return new OrigWorker(url, opts);
       return new OrigWorker(workerBootstrap(p, opts && opts.type === 'module'), opts);
     };
     window.Worker.prototype = OrigWorker.prototype;
+    // Sandboxed frames throw on navigator.serviceWorker; games get an inert stand-in.
     try {
-      const reg = navigator.serviceWorker && navigator.serviceWorker.register;
-      if (reg) Object.defineProperty(navigator.serviceWorker, 'register', { value: () => Promise.reject(new Error('Service workers are not available in ReSourcefy')) });
+      const fakeSW = {
+        register: () => Promise.reject(new Error('Service workers are not available in ReSourcefy')),
+        getRegistration: () => Promise.resolve(undefined),
+        getRegistrations: () => Promise.resolve([]),
+        addEventListener() {}, removeEventListener() {}, controller: null, ready: new Promise(() => {}),
+      };
+      Object.defineProperty(Navigator.prototype, 'serviceWorker', { configurable: true, get: () => fakeSW });
     } catch { /* ignore */ }
     for (const m of ['pushState', 'replaceState']) {
       const o = history[m];

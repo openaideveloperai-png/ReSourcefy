@@ -91,7 +91,7 @@ function oggCrc(u8) {
   return crc >>> 0;
 }
 
-class OggStream {
+export class OggStream {
   constructor(serial = 1) { this.serial = serial; this.seq = 0; this.pages = []; this.cur = []; this.segs = 0; this.bytes = 0; this.granule = -1; this.first = true; }
   packet(data, granule, flush = false) {
     const nseg = Math.floor(data.length / 255) + 1;
