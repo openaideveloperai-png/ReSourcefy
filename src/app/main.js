@@ -12,6 +12,7 @@ import { GameView, loadVendor } from './runner.js';
 import { zipBlob } from '../engine/util/zipblob.js';
 import { filesFromDataTransfer, pickFiles } from './ingest.js';
 import { placeFiles } from './missing.js';
+import * as store from './store.js';
 import { saveFile, extAllowed, askClaude, getSample } from './caps.js';
 import { sampleGameFiles } from './sample.js';
 
@@ -233,19 +234,60 @@ class App {
   async boot() {
     await this.engine.ready.catch(() => {});
     this.log('info', 'ReSourcefy engine started. Drop a game folder or archive to begin.');
+    let last = null;
+    try { last = (await store.listGames()).find((g) => g.complete); } catch { /* storage unavailable */ }
+    if (last && await this.reopen(last.id, { quiet: true })) return;
     await this.loadSample(true);
   }
 
+  // Open a game kept in this browser and put its edits back.
+  async reopen(id, { quiet = false } = {}) {
+    let saved;
+    try { saved = await store.loadGame(id); } catch (e) {
+      if (!quiet) this.toast('Could not open the saved game: ' + e.message, { error: true });
+      return false;
+    }
+    if (!saved.meta || !saved.files.length) return false;
+    this.log('info', `Reopening ${saved.meta.name} from this browser${saved.edits.length ? ` with ${saved.edits.length} edit${saved.edits.length === 1 ? '' : 's'}` : ''}…`);
+    return this.ingest(saved.files, { name: saved.meta.name, gameId: id, edits: saved.edits });
+  }
+
   async openDialog() {
-    modal({
+    const recent = h('div', { class: 'recent' });
+    const dlg = modal({
       title: 'Open a game',
-      body: h('p', null, 'Choose the folder that contains the game (recommended), or individual files such as a .pck, .apk, .zip, data.win, .wasm, .dll or .data.gz. You can also drag files anywhere onto this page.'),
+      body: h('div', { style: { display: 'grid', gap: '12px' } },
+        h('p', null, 'Choose the folder that contains the game (recommended), or individual files such as a .pck, .apk, .zip, data.win, .wasm, .dll or .data.gz. You can also drag files anywhere onto this page.'),
+        recent),
       actions: [
         { label: 'Cancel', value: null },
         { label: 'Choose files', run: () => { this.pick({ directory: false }); } },
         { label: 'Choose folder', primary: true, run: () => { this.pick({ directory: true }); } },
       ],
     });
+    this.renderRecent(recent, () => dlg.close(null));
+  }
+
+  // Games kept in this browser, newest first, with Open and Remove.
+  async renderRecent(el, close) {
+    let games = [];
+    try { games = (await store.listGames()).filter((g) => g.complete); } catch { return; }
+    clear(el);
+    if (!games.length) return;
+    const u = await store.usage();
+    el.append(h('h4', null, 'Kept in this browser'));
+    for (const g of games) {
+      const row = h('div', { class: 'recent-row' + (g.id === this.gameId ? ' current' : '') },
+        h('div', { class: 'recent-main' }, h('div', { class: 'recent-name' }, g.name), h('div', { class: 'muted small' }, [g.engine, formatBytes(g.size), g.edits ? `${g.edits} edit${g.edits === 1 ? '' : 's'}` : null, new Date(g.openedAt || g.createdAt).toLocaleDateString()].filter(Boolean).join(' · '))),
+        h('button', { class: 'btn sm', disabled: g.id === this.gameId, onclick: () => { close(); this.reopen(g.id); } }, g.id === this.gameId ? 'Open now' : 'Open'),
+        h('button', { class: 'btn sm', title: 'Remove it and its edits from this browser', onclick: async () => {
+          try { await store.deleteGame(g.id); } catch { /* ignore */ }
+          if (g.id === this.gameId) this.gameId = null;
+          this.renderRecent(el, close);
+        } }, 'Remove'));
+      el.append(row);
+    }
+    if (u && u.quota) el.append(h('p', { class: 'muted small' }, `Saved games use ${formatBytes(u.used)} of the ${formatBytes(u.quota)} this browser allows. Your edits are saved as you make them.`));
   }
 
   async pick({ directory }) {
@@ -258,7 +300,7 @@ class App {
     await this.ingest(files, { name: 'Orbit Courier (sample)', sample: true, quiet: auto });
   }
 
-  async ingest(files, { name, sample = false, quiet = false } = {}) {
+  async ingest(files, { name, sample = false, quiet = false, gameId = null, edits = [] } = {}) {
     if (this.game) this.game.stop(true);
     this.tabs.closeAll();
     const total = files.reduce((a, f) => a + f.blob.size, 0);
@@ -267,14 +309,51 @@ class App {
     try {
       const snap = await this.engine.call('ingest', { files, name });
       this.applySnapshot(snap, { sample });
+      this.gameId = sample ? null : gameId;
+      if (gameId) await this.applySavedEdits(edits);
       if (!sample) this.toast(`Analysis complete: ${this.mainEngineLabel()}`);
       this.autoOpen();
+      if (!sample && !gameId) this.keepGame(files);
+      else if (gameId) store.updateGame(gameId, { openedAt: Date.now() }).catch(() => {});
+      return true;
     } catch (e) {
       this.log('error', 'Analysis failed: ' + e.message);
       if (e.workerStack) console.error(e.workerStack);
       this.toast('Analysis failed: ' + e.message, { error: true });
+      return false;
     } finally {
       this.progress(null);
+    }
+  }
+
+  async applySavedEdits(edits) {
+    let applied = 0, listing = null;
+    const missed = [];
+    for (const ed of edits) {
+      try { const r = await this.engine.call('write', { path: ed.path, data: ed.blob }); listing = r.listing || listing; applied++; } catch { missed.push(ed.path); }
+    }
+    if (listing) this.refreshListing(listing);
+    if (applied) this.log('info', `Put back ${applied} saved edit${applied === 1 ? '' : 's'}.`);
+    if (missed.length) this.log('warn', `${missed.length} saved edit${missed.length === 1 ? '' : 's'} no longer match a file: ${missed.slice(0, 5).join(', ')}`);
+  }
+
+  // Keep a copy of a newly opened game in this browser (in the background).
+  async keepGame(files) {
+    const id = store.newGameId();
+    this.gameId = id;
+    const size = files.reduce((a, f) => a + f.blob.size, 0);
+    const meta = { id, name: this.project.name, engine: this.mainEngineLabel(), size, fileCount: files.length, createdAt: Date.now(), openedAt: Date.now(), edits: 0 };
+    try {
+      // the same files opened again replace the older copy; at most 8 games are kept
+      const games = await store.listGames();
+      for (const g of games) if (g.name === meta.name && g.size === size && g.fileCount === files.length) await store.deleteGame(g.id);
+      for (const g of (await store.listGames()).slice(7)) await store.deleteGame(g.id);
+      await store.saveGame(meta, files.map((f) => ({ path: String(f.path).replace(/^\/+/, ''), blob: f.blob })));
+      if (this.gameId === id) this.log('info', `Kept a copy of ${meta.name} in this browser, so it reopens after a reload.`);
+    } catch (e) {
+      try { await store.deleteGame(id); } catch { /* ignore */ }
+      if (this.gameId === id) this.gameId = null;
+      this.log('warn', `Couldn't keep a copy of this game in the browser (${e && e.name === 'QuotaExceededError' ? 'not enough storage' : (e && e.message) || 'storage unavailable'}); edits will be lost on reload.`);
     }
   }
 
@@ -364,6 +443,7 @@ class App {
       this.tabs.closeAll((t) => t.id !== 'game');
       const snap = await this.engine.call('addFiles', { files });
       this.applySnapshot(snap);
+      if (this.gameId) store.addFiles(this.gameId, files.map((f) => ({ path: f.path.replace(/^Build\//, ''), blob: f.blob }))).catch(() => {});
       const left = (this.project.missing || []).length;
       this.toast(`Added ${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'}${left ? ` · ${left} still missing` : ''}`);
       if (play) this.play();
@@ -420,18 +500,27 @@ class App {
   }
 
   makeViewer(tab, file) {
-    const replace = (accept) => async () => {
-      const picked = await pickFiles({ multiple: false, accept });
-      if (!picked.length) return;
-      await this.writeFile(file.path, await picked[0].blob.arrayBuffer());
+    const replaceWith = async (blob) => {
+      await this.writeFile(file.path, await blob.arrayBuffer());
       this.tabs.close(tab.id);
       this.openFile(file.path);
       this.toast('Replaced. Press Play (or Restart) to see it in the game.');
     };
+    const replace = (accept) => async () => {
+      const picked = await pickFiles({ multiple: false, accept });
+      if (picked.length) await replaceWith(picked[0].blob);
+    };
+    const canReplace = !file.converted && file.replaceable !== false;
+    const media = (accept) => ({
+      onReplace: canReplace ? replace(accept) : null,
+      onReplaceWith: canReplace ? replaceWith : null,
+      onRevert: file.modified ? () => this.revert(tab) : null,
+      onDownload: () => this.exportPaths([file.path], basename(file.path)),
+    });
     switch (file.view) {
       case 'code': return this.codeViewer(tab, file);
-      case 'image': return imageViewer(file, { onReplace: file.converted || file.replaceable === false ? null : replace('image/*') });
-      case 'audio': return audioViewer(file, { onReplace: file.converted || file.replaceable === false ? null : replace('audio/*') });
+      case 'image': return imageViewer(file, media('image/*'));
+      case 'audio': return audioViewer(file, media('audio/*'));
       case 'video': return videoViewer(file);
       case 'font': return fontViewer(file);
       case 'model': return this.lazyModel(file);
@@ -501,11 +590,20 @@ class App {
     const r = await this.engine.call('write', { path, data });
     if (r.listing) this.refreshListing(r.listing);
     this.log('info', `Saved ${path}`);
+    if (this.gameId) this.rememberEdit(path, new Blob([data]));
+  }
+
+  async rememberEdit(path, blob) {
+    try {
+      await store.saveEdit(this.gameId, path, blob);
+      await store.updateGame(this.gameId, { edits: this.listing.filter((x) => x.modified).length });
+    } catch { /* storage unavailable: the edit still applies for this session */ }
   }
 
   async revert(tab) {
     const r = await this.engine.call('revert', { path: tab.path });
     if (r.listing) this.refreshListing(r.listing);
+    if (this.gameId) store.deleteEdit(this.gameId, tab.path).catch(() => {});
     this.tabs.close(tab.id);
     this.openFile(tab.path);
     this.toast('Reverted to the original');

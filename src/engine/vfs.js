@@ -194,6 +194,8 @@ export class VFS {
     }
     if (!e.modified) {
       e.original = e.data;
+      e.originalProducer = e.producer; // a lazily made file has no data until it's opened
+      e.originalSize = e.size;
       e.modified = true;
     }
     if (typeof data === 'string') data = encodeUtf8(data);
@@ -209,9 +211,12 @@ export class VFS {
     if (e && e.ref) { e.modified = false; e = this.deref(e); }
     if (!e || !e.modified) return e;
     e.data = e.original;
-    e.size = e.data instanceof Blob ? e.data.size : e.data?.length ?? e.size;
+    if (e.data == null && e.originalProducer) e.producer = e.originalProducer;
+    e.size = e.data instanceof Blob ? e.data.size : e.data?.length ?? e.originalSize ?? e.size;
     e.modified = false;
     delete e.original;
+    delete e.originalProducer;
+    delete e.originalSize;
     this.version++;
     return e;
   }

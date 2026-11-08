@@ -415,3 +415,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .modal textarea.cmd { resize: vertical; white-space: pre; overflow: auto; font-size: 11px; line-height: 1.5; }
 .missing-links { display: grid; gap: 2px; padding: 6px 0 0; font-family: var(--font-mono); font-size: 12px; }
 .missing-links a { color: var(--accent); overflow-wrap: anywhere; }
+
+/* games kept in this browser */
+.recent { display: grid; gap: 6px; }
+.recent:empty { display: none; }
+.recent-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunken); }
+.recent-row.current { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.recent-main { flex: 1; min-width: 0; }
+.recent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-body.drop-target, .audio-card.drop-target { outline: 2px dashed var(--accent); outline-offset: -6px; }

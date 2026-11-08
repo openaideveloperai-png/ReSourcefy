@@ -1,7 +1,32 @@
 // Image, audio, video and font viewers.
 import { h, icons, formatBytes } from '../dom.js';
 
-export function imageViewer(file, { onReplace } = {}) {
+// Buttons shared by replaceable media: Replace (pick a file), Revert, Download.
+function mediaActions(file, { onReplace, onRevert, onDownload }, what) {
+  return [
+    onReplace ? h('button', { class: 'btn sm', onclick: onReplace, title: `Replace this ${what} with one from your computer (or drop a file here)` }, h('span', { html: icons.upload }), 'Replace') : null,
+    onRevert ? h('button', { class: 'btn sm ghost', onclick: onRevert, title: 'Go back to the original' }, h('span', { html: icons.revert }), 'Revert') : null,
+    onDownload ? h('button', { class: 'btn sm ghost', onclick: onDownload, title: `Download this ${what}` }, h('span', { html: icons.download })) : null,
+  ];
+}
+
+// Dropping a matching file on the viewer replaces the asset.
+function dropToReplace(el, accept, onReplaceWith) {
+  if (!onReplaceWith) return;
+  const ok = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  el.addEventListener('dragover', (e) => { if (!ok(e)) return; e.preventDefault(); e.stopPropagation(); el.classList.add('drop-target'); });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+  el.addEventListener('drop', (e) => {
+    if (!ok(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('drop-target');
+    const f = [...e.dataTransfer.files].find((x) => accept.test(x.type || '') || accept.test(x.name));
+    if (f) onReplaceWith(f);
+  });
+}
+
+export function imageViewer(file, opts = {}) {
   const url = URL.createObjectURL(file.blob);
   const img = h('img', { src: url, alt: file.name, draggable: 'false' });
   const stage = h('div', { class: 'media-stage checker' }, img);
@@ -36,9 +61,10 @@ export function imageViewer(file, { onReplace } = {}) {
       h('button', { title: 'Zoom in', onclick: () => { fit = false; zoom = Math.min(64, zoom * 1.5); apply(); } }, '+'),
     ),
     zl,
-    onReplace ? h('button', { class: 'btn sm', onclick: onReplace, title: 'Replace this image with one from your computer' }, h('span', { html: icons.upload }), 'Replace') : null,
+    ...mediaActions(file, opts, 'image'),
   );
   const body = h('div', { class: 'view-body' }, stage);
+  dropToReplace(body, /^image\/|\.(png|jpe?g|gif|webp|bmp|avif)$/i, opts.onReplaceWith);
   stage.addEventListener('wheel', (e) => {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
@@ -52,14 +78,14 @@ export function imageViewer(file, { onReplace } = {}) {
   return { el: [bar, note, body].filter(Boolean), destroy() { ro.disconnect(); URL.revokeObjectURL(url); } };
 }
 
-export function audioViewer(file, { onReplace } = {}) {
+export function audioViewer(file, opts = {}) {
   const url = URL.createObjectURL(file.blob);
   const audio = h('audio', { controls: true, src: url, preload: 'metadata' });
   const canvas = h('canvas', { width: 1100, height: 192, 'aria-label': 'Waveform' });
   const meta = h('div', { class: 'muted num' }, formatBytes(file.size));
   const card = h('div', { class: 'audio-card' }, h('div', { style: { fontWeight: 600 } }, file.name), canvas, audio, meta);
-  const bar = h('div', { class: 'view-bar' }, h('span', { class: 'path', title: file.path }, file.path),
-    onReplace ? h('button', { class: 'btn sm', onclick: onReplace }, h('span', { html: icons.upload }), 'Replace') : null);
+  const bar = h('div', { class: 'view-bar' }, h('span', { class: 'path', title: file.path }, file.path), ...mediaActions(file, opts, 'sound'));
+  dropToReplace(card, /^audio\/|\.(ogg|mp3|wav|m4a|aac|flac|opus)$/i, opts.onReplaceWith);
   (async () => {
     try {
       const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
