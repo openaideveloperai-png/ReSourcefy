@@ -1,11 +1,13 @@
 // Unity engine: WebGL, desktop (Mono / IL2CPP), Android and asset bundles.
-import { loadTpk, parseUnityVersion } from './typetree.js';
+import { loadTpk, parseUnityVersion, versionKey, readTyped, writeTyped } from './typetree.js';
+import { ScriptLayouts, toEditable, fromEditable } from './scriptlayout.js';
 import { SerializedFile, isSerializedFile } from './serialized.js';
 import { textureToPNG, spriteToPNG, audioClip, textAssetBytes, guessTextExt, meshToOBJ, fontBytes, videoBytes, objectJSON, readAlignedString } from './assets.js';
 import { parseMetadata, Il2CppModel, wasmBinary, peBinary, dumpType, isTopLevel, rewriteStringLiterals } from './il2cpp.js';
 import { parseWasm, buildMemory, functionTable, funcName, disassembleFunction } from '../../formats/wasm.js';
 import { isPE, parsePE } from '../../formats/pe.js';
 import { unityEdits, rebuildContainers, toBlob } from './write.js';
+import { Writer } from '../../util/binary.js';
 import { PagedBlob } from '../../util/paged.js';
 
 const RESOURCE_EXT = /\.(ress|resource)$/i;
@@ -224,6 +226,7 @@ export default {
     const version = versionOf(preferred) || files.map(versionOf).find(Boolean) || [...(ctx.state.unityVersions || [])][0] || null;
     eng.version = version;
     const major = parseUnityVersion(version)[0];
+    ctx.state.unity.vkey = versionKey(version);
     if (version) ctx.detail('unity', 'Unity version', version);
     ctx.detail('unity', 'Serialized files', files.length);
 
@@ -297,7 +300,7 @@ export default {
       for (const o of sf.objects) {
         const dir = typeDirs[o.classId];
         if (!dir || made > MAX_ASSETS) continue;
-        if (o.classId === 114 && !(o.type && o.type.tree)) continue; // script data needs a layout
+        if (o.classId === 114) continue; // script data is listed once the script layouts are known
         const name = sf.peekName(o) || `${dir}_${o.pathId}`;
         const cpath = container.get(sf.name.toLowerCase() + '|' + o.pathId);
         const base = cpath ? cpath.replace(/\.[a-z0-9]+$/i, '') : `Assets/${dir}/${safeName(name)}`;
@@ -368,6 +371,9 @@ export default {
       const game = managed.filter((e) => /^Assembly-CSharp/i.test(e.name)).map((e) => e.name);
       if (game.length) ctx.detail('unity', 'Game code', game.join(', '));
     }
+
+    // ---- script data (MonoBehaviour / ScriptableObject fields) ----
+    try { await listScriptData(ctx, env, files, scriptNames); } catch (err) { console.warn(err); ctx.note('warn', `Script data could not be listed: ${err.message}`); }
 
     if (web && web.loader) {
       const root = webRootOf(web);
@@ -471,6 +477,88 @@ createUnityInstance(document.querySelector('#unity-canvas'), {
   },
 };
 
+// Every MonoBehaviour / ScriptableObject whose layout is known (from the file's type trees or
+// rebuilt from IL2CPP) becomes an editable JSON file. A layout is used for an object only when it
+// reads the object's bytes exactly and writes them back unchanged.
+async function listScriptData(ctx, env, files, scriptNames) {
+  const st = ctx.state.unity;
+  const layouts = st.layouts && st.layouts.usable ? st.layouts : null;
+  const MAX = 30000;
+  let listed = 0, noLayout = 0, misfit = 0, total = 0;
+  const reasons = new Map();
+  const fits = (sf, o, tree) => {
+    try {
+      const r = sf.reader(o);
+      const v = readTyped(r, tree, 0, true);
+      if (r.pos !== o.byteSize) return false;
+      const w = new Writer(o.byteSize + 64, sf.le);
+      writeTyped(w, tree, v);
+      const out = w.result(), orig = sf.range(o.byteStart, o.byteSize);
+      if (out.length !== orig.length) return false;
+      for (let k = 0; k < out.length; k++) if (out[k] !== orig[k]) return false;
+      return true;
+    } catch { return false; }
+  };
+  for (const sf of files) {
+    const goNames = new Map();
+    for (const o of sf.objects) {
+      if (o.classId !== 114) continue;
+      total++;
+      if (listed >= MAX) continue;
+      let head;
+      try { head = sf.read(o, { partial: true }); } catch { continue; }
+      if (!head) continue;
+      const sp = head.m_Script || {};
+      const scriptFile = sp.m_FileID ? sf.externals[sp.m_FileID - 1] : sf.name;
+      const ms = scriptFile ? scriptNames.get(scriptFile.split('/').pop().toLowerCase() + '|' + sp.m_PathID) : null;
+      let tree = o.type && o.type.tree && o.type.tree.children.length > 4 ? o.type.tree : null;
+      if (!tree && layouts && ms) {
+        const ti = layouts.findType(ms.m_AssemblyName, ms.m_Namespace, ms.m_ClassName);
+        const r = ti >= 0 ? layouts.tree(ti) : { error: 'its class is not in the IL2CPP metadata' };
+        if (r.tree) tree = r.tree;
+        else reasons.set(r.error, (reasons.get(r.error) || 0) + 1);
+      }
+      if (!tree) { noLayout++; continue; }
+      if (!fits(sf, o, tree)) { misfit++; continue; }
+      // name it after its GameObject (components) or itself (ScriptableObjects)
+      let owner = '';
+      const go = head.m_GameObject;
+      if (go && go.m_PathID && !go.m_FileID) {
+        const key = String(go.m_PathID);
+        if (!goNames.has(key)) { const gobj = sf.byPathId.get(key); let n = ''; try { n = gobj ? sf.read(gobj, { partial: true }).m_Name || '' : ''; } catch { /* ignore */ } goNames.set(key, n); }
+        owner = goNames.get(key);
+      }
+      const cls = ms ? ms.m_ClassName : 'MonoBehaviour';
+      const label = `${owner || head.m_Name || cls} (${cls})`;
+      const fileKey = sf.entry, pathId = o.pathId, layout = tree;
+      const entry = ctx.recover(`Assets/MonoBehaviour/${safeName(label)}.json`, null, {
+        view: 'code', lang: 'json', kind: 'json',
+        producer: async () => {
+          const s = await env.load(fileKey);
+          const ob = s.byPathId.get(String(pathId));
+          if (!ob) throw new Error('object missing');
+          return JSON.stringify(toEditable(layout, readTyped(s.reader(ob), layout)), null, 2);
+        },
+        meta: { 'Unity class': ms ? 'MonoBehaviour (script data)' : 'MonoBehaviour', Script: ms ? `${ms.m_Namespace ? ms.m_Namespace + '.' : ''}${ms.m_ClassName}` : '(unknown)', 'Path ID': String(pathId), 'Source file': sf.name, Note: 'Edit values and save; Play and Export use them.' },
+      });
+      if (!entry) continue;
+      entry.unity = { file: sf.entry.path, pathId, classId: 114, tree: layout };
+      // check edits when they're saved, so mistakes show up right away
+      entry.writeback = async (c, e, reverting) => { if (!reverting) fromEditable(layout, JSON.parse(await c.vfs.text(e))); };
+      listed++;
+      if (listed % 250 === 0) { ctx.progress(`Listing script data (${listed})`, 0.9); await ctx.yield(); }
+    }
+  }
+  if (!total) return;
+  ctx.detail('unity', 'Script data', `${listed.toLocaleString()} of ${total.toLocaleString()} MonoBehaviours editable${misfit ? ` · ${misfit.toLocaleString()} didn't match their layout` : ''}`);
+  if (noLayout && !layouts && !files.some((f) => f.objects.some((o) => o.classId === 114 && o.type && o.type.tree && o.type.tree.children.length > 4))) {
+    ctx.note('info', 'Script values (MonoBehaviours) can be shown once the game code is readable: for IL2CPP builds that needs the WebAssembly or GameAssembly file next to the metadata.');
+  } else if (reasons.size) {
+    const top = [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([r, n]) => `${r} (${n})`).join('; ');
+    ctx.note('info', `Some script data can't be edited: ${top}.`);
+  }
+}
+
 async function sceneOutline(env, sf, sceneName, scenePath, scriptNames) {
   const gos = new Map(), transforms = new Map(), comps = new Map();
   for (const o of sf.objects) {
@@ -570,6 +658,7 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
   ctx.progress('IL2CPP: writing classes', 0.86);
   await ctx.yield();
   if (bin && !model.hasTypes) ctx.note('warn', `Type tables were not found in ${binLabel}; the dump shows names without types.`);
+  if (model.hasTypes) ctx.state.unity.layouts = new ScriptLayouts(md, model, { tpk: env.tpk, vkey: ctx.state.unity.vkey });
   if (model.hasTypes) ctx.detail('unity', 'Binary', `${binLabel} (types resolved)`);
   // method pointers
   let modules = null;

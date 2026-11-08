@@ -8,6 +8,7 @@ import { writeTyped } from './typetree.js';
 import { readBundle } from './bundle.js';
 import { readUnityWebData } from '../../containers/unityweb.js';
 import { texturePixels } from './assets.js';
+import { fromEditable } from './scriptlayout.js';
 
 const toBlob = (x) => (x instanceof Blob ? x : new Blob([x]));
 
@@ -293,6 +294,7 @@ export async function unityEdits(ctx, env, notes) {
     try {
       const bytes = await ctx.vfs.bytes(e);
       if (classId === 49) { const op = opFor(entry, pathId, 49); op.text = bytes; op.names.push(e.name); }
+      else if (classId === 114 && e.unity.tree) { const op = opFor(entry, pathId, 114); op.text = bytes; op.tree = e.unity.tree; op.names.push(e.name); }
       else if (classId === 28) { const op = opFor(entry, pathId, 28); op.full = bytes; op.names.push(e.name); }
       else if (classId === 213) {
         const sf = await env.load(entry);
@@ -318,11 +320,15 @@ export async function unityEdits(ctx, env, notes) {
       const repl = new Map();
       for (const op of list) {
         const obj = sf.byPathId.get(String(op.pathId));
-        const tree = obj && sf.treeFor(obj);
+        const tree = obj && (op.tree || sf.treeFor(obj));
         if (!tree) { notes.push(`${op.names.join(', ')}: no layout is known for this asset, so it can't be written.`); continue; }
-        const value = sf.read(obj, { raw: true });
+        let value;
+        if (op.classId === 114) {
+          try { value = fromEditable(tree, JSON.parse(new TextDecoder().decode(op.text))); } catch (err) { notes.push(`${op.names[0]}: ${err.message}; the game keeps the original values.`); continue; }
+        } else value = sf.read(obj, { raw: true });
         if (op.classId === 49) value.m_Script = op.text;
-        else {
+        else if (op.classId === 114) { /* the edited values replace the object */ }
+        else if (op.classId === 28) {
           const W = value.m_Width, H = value.m_Height;
           let rgba;
           if (op.full) {

@@ -9,7 +9,7 @@ Everything runs in the browser; files are never uploaded.
 
 | Engine | Builds | Recovered | Play | Edits |
 | --- | --- | --- | --- | --- |
-| Unity | WebGL, Windows, macOS, Linux, Android | C# from Mono DLLs, IL2CPP class dump (metadata v24–v108, Unity 2017–6.6), scenes, textures, audio, meshes, text | WebGL builds | Textures, sprites, text assets, IL2CPP string literals |
+| Unity | WebGL, Windows, macOS, Linux, Android | C# from Mono DLLs, IL2CPP class dump (metadata v24–v108, Unity 2017–6.6), scenes, textures, audio, meshes, text | WebGL builds | Textures, sprites, text assets, script values (MonoBehaviour, ScriptableObject), IL2CPP string literals |
 | Godot | 3.x and 4.x, `.pck` or embedded in the executable | GDScript from compiled scripts, binary scenes to `.tscn`, textures, audio, fonts, `project.godot` | Bundled Godot 3.6 / 4.4 / 4.7 web runtimes | Scripts, scenes, images, settings (rebuilt `.pck`) |
 | GameMaker | `data.win`, `game.unx`, `game.ios`, `game.droid` | Texture pages, sprite frames, tilesets, sounds, strings, resource index | HTML5 exports | Export |
 | RPG Maker | MV, MZ; XP/VX/VX Ace archives | Plugins, maps/events/database JSON, decrypted images and audio | MV & MZ | Data, plugins, assets |
