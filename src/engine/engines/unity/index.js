@@ -235,7 +235,10 @@ export default {
     const counts = {};
     const scriptNames = new Map();
     const levelFiles = [];
+    let fileNo = 0;
     for (const sf of files) {
+      ctx.progress(`Listing assets in ${sf.name} (${++fileNo}/${files.length})`, 0.6 + 0.1 * (fileNo / files.length));
+      await ctx.yield();
       if (/^level\d+$/i.test(sf.name) || sf.objects.some((o) => o.classId === 1 && /^level\d+$/i.test(sf.name))) levelFiles.push(sf);
       for (const o of sf.objects) {
         const cls = o.classId;
@@ -458,6 +461,8 @@ async function sceneOutline(env, sf, sceneName, scenePath, scriptNames) {
 }
 
 async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
+  ctx.progress('IL2CPP: reading metadata', 0.75);
+  await ctx.yield();
   const metaBytes = await ctx.vfs.bytes(metaEntry);
   const md = parseMetadata(metaBytes);
   ctx.detail('unity', 'IL2CPP metadata', `v${md.version}${md.rawVersion !== md.version ? ` (file says ${md.rawVersion})` : ''} · ${md.typeDefs.length.toLocaleString()} types · ${md.methodDefs.length.toLocaleString()} methods`);
@@ -469,6 +474,8 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
   const wasmEntry = web && web.code ? unwrapped(ctx, web.code) : ctx.vfs.find((e) => e.kind === 'wasm' && e.origin !== 'recovered');
   if (wasmEntry && /wasm/i.test(wasmEntry.name)) {
     try {
+      ctx.progress('IL2CPP: reading the WebAssembly code', 0.78);
+      await ctx.yield();
       const u8 = await ctx.vfs.bytes(wasmEntry);
       const m = parseWasm(u8);
       const mem = buildMemory(m, u8);
@@ -496,7 +503,11 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
       ctx.note('info', 'Android IL2CPP binaries (libil2cpp.so) are not analyzed yet; type names come from metadata only.');
     }
   }
+  ctx.progress('IL2CPP: matching types', 0.82);
+  await ctx.yield();
   const model = new Il2CppModel(md, bin, { unityMajor });
+  ctx.progress('IL2CPP: writing classes', 0.86);
+  await ctx.yield();
   if (bin && !model.hasTypes) ctx.note('warn', `Type tables were not found in ${binLabel}; the dump shows names without types.`);
   if (model.hasTypes) ctx.detail('unity', 'Binary', `${binLabel} (types resolved)`);
   // method pointers

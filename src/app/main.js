@@ -20,8 +20,25 @@ class App {
     this.engine = new EngineClient('engine.js');
     this.engine.on('log', (m) => this.log(m.level, m.msg));
     this.engine.on('progress', (m) => this.progress(m.label, m.frac));
+    this.engine.on('dead', (m) => this.engineRestarted(m.reason));
     this.layout();
     this.bindGlobal();
+    // offer a way out if the engine stops answering
+    setInterval(() => this.checkStuck(), 2000);
+  }
+
+  checkStuck() {
+    const silent = Date.now() - this.engine.lastActivity;
+    const stuck = this.engine.busy && silent > 15000;
+    if (this.stopBtn) this.stopBtn.hidden = !stuck;
+    if (stuck) this.stopBtn.textContent = `No response for ${Math.round(silent / 1000)} s — Stop`;
+  }
+
+  engineRestarted(reason) {
+    this.progress(null);
+    if (this.stopBtn) this.stopBtn.hidden = true;
+    this.log('warn', `${reason}. The engine was restarted; open the game again to retry. If it keeps happening, include every file of the build (for Unity WebGL: the .loader.js, .framework.js, .data and .wasm files).`);
+    this.toast(`${reason}. Open the game again to retry.`, { error: true });
   }
 
   // ---------------- layout ----------------
@@ -97,9 +114,10 @@ class App {
     // Status bar
     this.progressText = h('span', null, 'Ready');
     this.progressBar = h('i');
+    this.stopBtn = h('button', { class: 'btn sm danger', hidden: true, onclick: () => this.engine.restart('Analysis stopped') }, 'Stop');
     this.statsEl = h('span', { class: 'num' }, '');
     const status = h('footer', { class: 'statusbar' },
-      h('div', { class: 'progress' }, h('div', { class: 'bar', hidden: true }, this.progressBar), this.progressText),
+      h('div', { class: 'progress' }, h('div', { class: 'bar', hidden: true }, this.progressBar), this.progressText, this.stopBtn),
       h('span', { class: 'grow' }), this.statsEl, h('span', null, 'Runs entirely in your browser'));
 
     this.dropOverlay = h('div', { class: 'drop-overlay', 'aria-hidden': 'true' }, h('div', null, 'Drop to analyze'));

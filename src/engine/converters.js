@@ -2,6 +2,7 @@
 // kind -> async (ctx, entry) => { view, text?, lang?, blob?, mime?, meta? }
 // Engine modules register more with registerConverter().
 import { isPE, parsePE, summarizePE, readIcon } from './formats/pe.js';
+import { parseWasm, summarizeWasm } from './formats/wasm.js';
 import { decodeTGA, decodeDDS } from './util/imagefmt.js';
 import { pngBlob } from './util/png.js';
 
@@ -34,4 +35,10 @@ registerConverter('tga', async (ctx, e) => {
 registerConverter('dds', async (ctx, e) => {
   const img = decodeDDS(await ctx.vfs.bytes(e));
   return { view: 'image', blob: pngBlob(img.rgba, img.width, img.height), mime: 'image/png', note: `DDS ${img.format} ${img.width}×${img.height} (converted to PNG for viewing)` };
+});
+
+registerConverter('wasm', async (ctx, e) => {
+  const u8 = await ctx.vfs.bytes(e);
+  const m = parseWasm(u8);
+  return { view: 'code', lang: 'markdown', text: summarizeWasm(m, e.name), readonly: true };
 });

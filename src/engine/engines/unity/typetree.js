@@ -214,6 +214,8 @@ export function id64(r) {
 }
 
 const ALIGN = 0x4000;
+const PRIM_SIZE = { bool: 1, SInt8: 1, UInt8: 1, char: 1, SInt16: 2, short: 2, UInt16: 2, 'unsigned short': 2, SInt32: 4, int: 4, UInt32: 4, 'unsigned int': 4, 'Type*': 4, float: 4,
+  SInt64: 8, long: 8, 'long long': 8, UInt64: 8, 'unsigned long long': 8, FileSize: 8, double: 8 };
 const PRIM = {
   SInt8: (r) => r.i8(), UInt8: (r) => r.u8_(), char: (r) => r.u8_(),
   SInt16: (r) => r.i16(), short: (r) => r.i16(), UInt16: (r) => r.u16(), 'unsigned short': (r) => r.u16(),
@@ -243,9 +245,12 @@ export function readTyped(r, node, depth = 0) {
     const arr = node.children[0];
     if (arr.metaFlag & ALIGN) align = true;
     const size = r.i32();
-    if (size < 0 || size > 1e8) throw new Error('bad array size ' + size);
     const sub = arr.children[1];
     const sp = PRIM[sub.type];
+    // every element takes at least one byte (primitives their full size): a count larger than
+    // what is left means the layout was misread, so stop instead of looping millions of times
+    const minSize = sp ? Math.max(1, PRIM_SIZE[sub.type] || 1) : 1;
+    if (size < 0 || size * minSize > r.remaining) throw new Error('bad array size ' + size);
     if (sp && (sub.type === 'UInt8' || sub.type === 'char' || sub.type === 'SInt8')) {
       value = r.bytes(size);
     } else if (sp) {

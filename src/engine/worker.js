@@ -41,6 +41,8 @@ const methods = {
   async search(params) { return searchFiles(ctx, params); },
   async prepareRun(params) { const r = await prepareRun(ctx, params || {}); trimCaches(ctx); return r; },
   async trim() { trimCaches(ctx); return true; },
+  // testing aid: force large-file (windowed) reading for files above `largeFile` bytes
+  async debugMemory({ largeFile } = {}) { ctx.memory = { ...ctx.memory, largeFile }; return ctx.memory.largeFile; },
   async exportFiles(params) { return exportFiles(ctx, params || {}); },
   async action(params) {
     const r = await runAction(ctx, params);
