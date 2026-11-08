@@ -115,6 +115,8 @@ export class GameView {
       try { this.iframe.focus(); } catch { /* ignore */ }
     } else if (m.type === 'log') {
       this.app.log(m.level, m.msg, 'game');
+    } else if (m.type === 'logs') {
+      this.app.logMany(m.items || [], 'game', m.dropped || 0);
     } else if (m.type === 'storage') {
       storeSaves(this.app.project ? this.app.project.name : 'game', m.data);
     } else if (m.type === 'failed') {

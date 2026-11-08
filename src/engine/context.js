@@ -2,11 +2,14 @@
 // the UI shows, logging/progress hooks, and helpers used by every module.
 import { VFS } from './vfs.js';
 import { sniffBytes } from './sniff.js';
+import { memory } from './memory.js';
 
 export class Context {
   constructor(emit) {
     this.emit = emit;
+    this.memory = memory;
     this.vfs = new VFS();
+    this.vfs.blobAbove = memory.blobAbove;
     this.reset();
   }
 

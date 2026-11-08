@@ -18,11 +18,29 @@ export function brotli(u8) {
   return new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
 }
 
+export function brotliToBlob(u8) { return BrotliDecode.toBlob(new Int8Array(u8.buffer, u8.byteOffset, u8.byteLength)); }
+
 // Streams large gzip/deflate payloads through the browser's native inflater.
 export async function nativeDecompress(blob, format) {
   const ds = new DecompressionStream(format);
   const res = new Response(blob.stream().pipeThrough(ds));
   return new Uint8Array(await res.arrayBuffer());
+}
+
+// Same, collecting the output into a Blob in 8 MB groups (bounded memory).
+export async function nativeDecompressToBlob(blob, format) {
+  const reader = blob.stream().pipeThrough(new DecompressionStream(format)).getReader();
+  const blobs = [];
+  let group = [], groupBytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    group.push(value);
+    groupBytes += value.length;
+    if (groupBytes >= 8 << 20) { blobs.push(new Blob(group)); group = []; groupBytes = 0; }
+  }
+  if (group.length) blobs.push(new Blob(group));
+  return new Blob(blobs);
 }
 
 // LZ4 block format (Unity, Defold, Godot). `size` = expected output size.

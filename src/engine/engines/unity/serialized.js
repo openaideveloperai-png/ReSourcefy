@@ -15,8 +15,23 @@ export function isSerializedFile(u8) {
 }
 
 export class SerializedFile {
-  constructor(u8, name, tpk) {
-    this.u8 = u8;
+  // src: the whole file as a Uint8Array, or a PagedBlob for large files (only the
+  // metadata is read up front; object bytes are read when needed).
+  constructor(src, name, tpk) {
+    let u8 = src;
+    if (!(src instanceof Uint8Array)) {
+      this.paged = src;
+      const h = src.get(0, 48);
+      const hv = new DataView(h.buffer, h.byteOffset, h.byteLength);
+      const v = hv.getUint32(8, false);
+      const meta = v >= 22 ? Number(hv.getUint32(20, false)) + 64 : hv.getUint32(0, false) + 64;
+      u8 = src.get(0, Math.min(src.size, meta)).slice();
+      this.u8 = null;
+      this.size = src.size;
+    } else {
+      this.u8 = u8;
+      this.size = u8.length;
+    }
     this.name = name;
     this.tpk = tpk;
     const r = new Reader(u8, false);
@@ -140,9 +155,16 @@ export class SerializedFile {
     return classTree(this.tpk, obj.classId, this.vkey);
   }
 
+  range(start, len) { return this.paged ? this.paged.get(start, len) : this.u8.subarray(start, start + len); }
+
   reader(obj) {
-    return new Reader(this.u8, this.le, obj.byteStart, obj.byteSize);
+    return new Reader(this.range(obj.byteStart, obj.byteSize), this.le);
   }
+
+  // bytes this parsed file keeps alive
+  get memSize() { return this.paged ? this.paged.bytes + 1024 * this.objects.length / 8 : this.size; }
+
+  release() { if (this.paged) this.paged.release(); }
 
   // Fully parse an object with its type tree. Returns null if no layout is known.
   read(obj, { partial = false } = {}) {

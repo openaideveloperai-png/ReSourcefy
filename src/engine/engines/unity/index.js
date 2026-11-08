@@ -7,10 +7,12 @@ import { parseWasm, buildMemory, functionTable, funcName, disassembleFunction } 
 import { isPE, parsePE } from '../../formats/pe.js';
 import { readUnityWebData } from '../../containers/unityweb.js';
 import { Writer } from '../../util/binary.js';
+import { PagedBlob } from '../../util/paged.js';
 
 const RESOURCE_EXT = /\.(ress|resource)$/i;
 const SERIALIZED_NAME = /^(globalgamemanagers(\.assets)?|maindata|level\d+|sharedassets\d+\.assets|resources\.assets|unity default resources|unity_builtin_extra|.+\.assets|cab-[0-9a-f]+|buildplayer-.+)$/i;
 const MAX_CACHE = 768 * 1024 * 1024;
+const cacheBudget = (ctx) => (ctx.memory ? ctx.memory.budget(MAX_CACHE) : MAX_CACHE);
 
 // Holds parsed serialized files and resolves cross-file references.
 class UnityEnv {
@@ -38,18 +40,33 @@ class UnityEnv {
   async load(entry) {
     const hit = this.cache.get(entry.path);
     if (hit) { this.cache.delete(entry.path); this.cache.set(entry.path, hit); return hit; }
-    const u8 = await this.ctx.vfs.bytes(entry);
-    const sf = new SerializedFile(u8, entry.name, this.tpk);
+    const sf = new SerializedFile(await this.source(entry), entry.name, this.tpk);
     sf.entry = entry;
+    sf.cost = sf.paged ? sf.paged.budget : sf.size;
     this.cache.set(entry.path, sf);
-    this.cacheBytes += u8.length;
-    while (this.cacheBytes > MAX_CACHE && this.cache.size > 1) {
+    this.cacheBytes += sf.cost;
+    const budget = cacheBudget(this.ctx);
+    while (this.cacheBytes > budget && this.cache.size > 1) {
       const [k, v] = this.cache.entries().next().value;
       this.cache.delete(k);
-      this.cacheBytes -= v.u8.length;
+      v.release();
+      this.cacheBytes -= v.cost;
     }
     return sf;
   }
+  // big files stay in their Blob and are read in windows
+  async source(entry) {
+    const mem = this.ctx.memory;
+    const t = this.ctx.vfs.deref(entry) || entry;
+    if (mem && PagedBlob.supported() && (t.size || 0) > mem.largeFile) {
+      const blob = await this.ctx.vfs.blob(t);
+      const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+      const version = new DataView(head.buffer).getUint32(8, false);
+      if (version >= 9) return new PagedBlob(blob, Math.min(64 << 20, mem.budget(192 << 20)));
+    }
+    return this.ctx.vfs.bytes(entry);
+  }
+  trim() { for (const v of this.cache.values()) v.release(); this.cache.clear(); this.cacheBytes = 0; }
   async resolve(sf, pptr) {
     if (!pptr) return null;
     const fileId = pptr.m_FileID ?? pptr.fileID ?? 0, pathId = pptr.m_PathID ?? pptr.pathID;
@@ -113,6 +130,7 @@ function safeName(s) {
 export default {
   id: 'unity',
   name: 'Unity',
+  trim(ctx) { if (ctx.state.unity && ctx.state.unity.env) ctx.state.unity.env.trim(); },
   async detect(ctx) {
     let score = 0;
     const sig = [];

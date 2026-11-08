@@ -175,16 +175,27 @@ class App {
   }
 
   // ---------------- logging & progress ----------------
-  log(level, msg, src) {
-    const t = new Date();
-    const time = t.toTimeString().slice(0, 8);
-    const row = h('div', { class: 'log ' + (level === 'warn' || level === 'error' ? level : '') + (src ? ' game' : '') },
-      h('span', { class: 't' }, time), src ? h('span', { class: 'src' }, '[' + src + ']') : null, h('span', null, msg));
-    this.consoleEl.appendChild(row);
-    while (this.consoleEl.childNodes.length > 3000) this.consoleEl.firstChild.remove();
+  log(level, msg, src) { this.logMany([{ level, msg }], src); }
+
+  // Append many console lines with one DOM update (game output arrives in batches).
+  logMany(items, src, dropped = 0) {
+    const time = new Date().toTimeString().slice(0, 8);
     const body = this.dockBody;
-    if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) body.scrollTop = body.scrollHeight;
-    if (level === 'error') { const c = this.dockTabs.console.querySelector('.count'); c.textContent = String((+c.textContent || 0) + 1); }
+    const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    const frag = document.createDocumentFragment();
+    let errors = 0;
+    const max = 2000;
+    for (const { level, msg } of items.length > max ? items.slice(-max) : items) {
+      if (level === 'error') errors++;
+      frag.appendChild(h('div', { class: 'log ' + (level === 'warn' || level === 'error' ? level : '') + (src ? ' game' : '') },
+        h('span', { class: 't' }, time), src ? h('span', { class: 'src' }, '[' + src + ']') : null, h('span', null, msg)));
+    }
+    if (dropped) frag.appendChild(h('div', { class: 'log warn game' }, h('span', { class: 't' }, time), h('span', null, `… ${dropped.toLocaleString()} more game messages skipped to keep the editor responsive`)));
+    this.consoleEl.appendChild(frag);
+    const extra = this.consoleEl.childNodes.length - max;
+    for (let i = 0; i < extra; i++) this.consoleEl.firstChild.remove();
+    if (stick) body.scrollTop = body.scrollHeight;
+    if (errors) { const c = this.dockTabs.console.querySelector('.count'); c.textContent = String((+c.textContent || 0) + errors); }
   }
   toast(msg, opts) { toast(msg, opts); }
 

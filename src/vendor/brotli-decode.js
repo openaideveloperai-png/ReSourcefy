@@ -2457,6 +2457,34 @@ let makeBrotliDecode = () => {
     return result;
   }
 
+  // Same as decode, but the output is gathered into a Blob 8 MB at a time so a big
+  // payload never needs a second full-size copy in memory.
+  function decodeToBlob(bytes) {
+    let s = new State();
+    s.input = new InputStream(bytes);
+    initState(s);
+    const blobs = [];
+    let group = [], groupBytes = 0, total = 0;
+    while (true) {
+      const chunk = new Int8Array(65536);
+      s.output = chunk;
+      s.outputOffset = 0;
+      s.outputLength = 65536;
+      s.outputUsed = 0;
+      decompress(s);
+      total += s.outputUsed;
+      group.push(s.outputUsed < 65536 ? chunk.subarray(0, s.outputUsed) : chunk);
+      groupBytes += s.outputUsed;
+      if (groupBytes >= 8 << 20) { blobs.push(new Blob(group)); group = []; groupBytes = 0; }
+      if (s.outputUsed < 65536) break;
+    }
+    if (group.length) blobs.push(new Blob(group));
+    close(s);
+    closeInput(s);
+    return new Blob(blobs);
+  }
+  decode.toBlob = decodeToBlob;
+
   return decode;
 };
 

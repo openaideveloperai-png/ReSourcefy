@@ -56,16 +56,18 @@ export async function readBundle(blob) {
     const files = [];
     for (let i = 0; i < nNodes; i++) files.push({ offset: ib.u64(), size: ib.u64(), flags: ib.u32(), path: ib.cstr() });
     if (!oldFlags && (flagsVal & 0x200)) r.align(16);
-    let total = 0;
-    for (const b of blocks) total += b.usize;
-    const data = new Uint8Array(total);
-    let o = 0;
+    // unpacked blocks are gathered into a Blob 8 MB at a time; files are slices of it
+    const blobs = [];
+    let group = [], groupBytes = 0;
     for (const b of blocks) {
       const comp = r.bytes(b.csize);
       const out = decompressBlock(comp, b.usize, b.flags);
-      data.set(out.subarray(0, b.usize), o);
-      o += b.usize;
+      group.push(out.length === b.usize ? out : out.subarray(0, b.usize));
+      groupBytes += b.usize;
+      if (groupBytes >= 8 << 20) { blobs.push(new Blob(group)); group = []; groupBytes = 0; }
     }
+    if (group.length) blobs.push(new Blob(group));
+    const data = new Blob(blobs);
     return { ...info, files, data, compression: ['none', 'LZMA', 'LZ4', 'LZ4HC', 'LZHAM'][blocks[0] ? blocks[0].flags & 0x3f : 0] || 'none' };
   }
   if (signature === 'UnityWeb' || signature === 'UnityRaw') {
@@ -102,7 +104,7 @@ export default {
     const b = await readBundle(blob);
     for (const f of b.files) {
       const name = f.path.replace(/^archive:\//, '');
-      ctx.extract(`${e.path}/${name}`, b.data.slice(f.offset, f.offset + f.size), { source: e.path, meta: { bundleFile: true } });
+      ctx.extract(`${e.path}/${name}`, b.data instanceof Blob ? b.data.slice(f.offset, f.offset + f.size) : new Blob([b.data.subarray(f.offset, f.offset + f.size)]), { source: e.path, meta: { bundleFile: true } });
     }
     e.meta = { ...(e.meta || {}), bundle: b.signature, unityVersion: b.unityVersion, compression: b.compression, files: b.files.length };
     (ctx.state.unityVersions ||= new Set()).add(b.unityVersion);

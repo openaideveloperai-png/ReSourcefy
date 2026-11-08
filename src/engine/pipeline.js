@@ -317,6 +317,11 @@ export async function exportFiles(ctx, { scope = 'modified', paths, root = '' })
   return { blob: new Blob([zip], { type: 'application/zip' }), count: files.length };
 }
 
+// Drop parsed-file caches (they are rebuilt on demand), e.g. before a game starts.
+export function trimCaches(ctx) {
+  for (const eng of engines) if (eng.trim) { try { eng.trim(ctx); } catch (err) { console.warn(err); } }
+}
+
 export async function runAction(ctx, { id, params }) {
   for (const eng of engines) {
     if (eng.actions && eng.actions[id]) return eng.actions[id](ctx, params || {});

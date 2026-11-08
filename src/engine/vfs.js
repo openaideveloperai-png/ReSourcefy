@@ -141,6 +141,8 @@ export class VFS {
         let d = await p(e);
         if (typeof d === 'string') d = encodeUtf8(d);
         else if (d && !(d instanceof Blob)) d = toU8(d);
+        // large results go to a Blob, which the browser may keep out of RAM
+        if (d && !(d instanceof Blob) && this.blobAbove && d.length > this.blobAbove && !e.keepBytes) d = new Blob([d]);
         e.data = d ?? new Uint8Array(0);
         e.size = e.data instanceof Blob ? e.data.size : e.data.length;
       } catch (err) {

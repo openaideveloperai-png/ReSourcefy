@@ -18,19 +18,33 @@ import * as FakeIDB from 'fake-indexeddb';
     if (typeof a === 'string') return a;
     try { return JSON.stringify(a, (k, v) => (typeof v === 'bigint' ? v.toString() : v)); } catch { return String(a); }
   };
-  let logBudget = 4000;
+  // Console output is sent in batches, at most a few hundred lines a second, so a game
+  // that logs every frame can't slow the editor down.
+  let queue = [], dropped = 0, timer = 0, windowCount = 0;
+  const flush = () => {
+    timer = 0;
+    windowCount = 0;
+    if (!queue.length && !dropped) return;
+    post({ type: 'logs', items: queue, dropped });
+    queue = [];
+    dropped = 0;
+  };
+  const queueLog = (level, msg) => {
+    if (windowCount++ > 150 && level !== 'error') dropped++;
+    else queue.push({ level, msg });
+    if (!timer) timer = setTimeout(flush, 250);
+  };
   for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
     const orig = console[level].bind(console);
     console[level] = (...args) => {
       orig(...args);
-      if (logBudget-- > 0) post({ type: 'log', level: level === 'debug' ? 'log' : level, msg: args.map(fmt).join(' ').slice(0, 4000) });
-      else if (logBudget === -1) post({ type: 'log', level: 'warn', msg: 'Game console output truncated (too many messages).' });
+      queueLog(level === 'debug' ? 'log' : level, args.map(fmt).join(' ').slice(0, 4000));
     };
   }
   // document.open() erases window listeners, so the written page re-installs these first.
   window.__rsfReinstall = () => {
-    window.addEventListener('error', (e) => post({ type: 'log', level: 'error', msg: `${e.message || 'Error'}${e.filename ? ` (${e.filename.replace(/^blob:[^ ]*/, 'script')}:${e.lineno})` : ''}` }));
-    window.addEventListener('unhandledrejection', (e) => post({ type: 'log', level: 'error', msg: 'Unhandled promise rejection: ' + fmt(e.reason) }));
+    window.addEventListener('error', (e) => queueLog('error', `${e.message || 'Error'}${e.filename ? ` (${e.filename.replace(/^blob:[^ ]*/, 'script')}:${e.lineno})` : ''}`));
+    window.addEventListener('unhandledrejection', (e) => queueLog('error', 'Unhandled promise rejection: ' + fmt(e.reason)));
   };
   window.__rsfReinstall();
 
