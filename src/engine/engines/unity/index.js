@@ -1,6 +1,7 @@
 // Unity engine: WebGL, desktop (Mono / IL2CPP), Android and asset bundles.
 import { loadTpk, parseUnityVersion, versionKey, readTyped, writeTyped } from './typetree.js';
-import { ScriptLayouts, toEditable, fromEditable } from './scriptlayout.js';
+import { ScriptLayouts, MonoLayouts, toEditable, fromEditable } from './scriptlayout.js';
+import { DotNetModule } from '../../formats/dotnet.js';
 import { SerializedFile, isSerializedFile } from './serialized.js';
 import { textureToPNG, spriteToPNG, audioClip, textAssetBytes, guessTextExt, meshToOBJ, fontBytes, videoBytes, objectJSON, readAlignedString } from './assets.js';
 import { parseMetadata, Il2CppModel, wasmBinary, peBinary, dumpType, isTopLevel, rewriteStringLiterals } from './il2cpp.js';
@@ -117,6 +118,9 @@ function findWebGL(ctx) {
   return r;
 }
 
+const DESKTOP_PLAY = "This is a desktop game: it runs on Windows (or macOS/Linux) from {exe}, and a web page can't run programs like that, so it can't be played inside ReSourcefy. Download a playable copy instead: it's the whole game folder with your edits. Unzip it and start {exe} on your computer.";
+const DESKTOP = "This is a desktop Unity build (the game runs from an .exe or app). Programs like that can't run inside a web page, so it can't be played here. Your edits can still go into the game: use Export > \u201cGame files with your edits\u201d, copy the files over the game folder, and start the game as usual.";
+
 // Folder the game's page is served from: the parent of the Build folder.
 function webRootOf(web) {
   const buildDir = web.dir.replace(/\/$/, '');
@@ -192,6 +196,15 @@ export default {
     const project = ctx.project;
     const eng = ctx.engine('unity', 'Unity');
     const web = findWebGL(ctx);
+    if (!web && ctx.vfs.find((e) => /_Data\/(globalgamemanagers|mainData|data\.unity3d)$/i.test(e.path))) {
+      ctx.state.unity.desktop = true;
+      const exe = ctx.vfs.find((e) => /\.exe$/i.test(e.name) && !/UnityCrashHandler/i.test(e.name) && e.origin === 'build');
+      ctx.state.unity.exe = exe ? exe.name : null;
+      project.platform = exe ? 'Windows' : ctx.vfs.find((e) => /\.app\//.test(e.path)) ? 'macOS' : 'Desktop';
+      // Play explains why it can't run here and offers a ready-to-run copy with the edits
+      project.runnable = { kind: 'desktop', label: project.platform, desktop: true, exe: exe ? exe.name : null };
+      ctx.note('info', DESKTOP);
+    }
     if (web) {
       project.platform = 'WebGL';
       ctx.state.unity.web = web;
@@ -370,6 +383,11 @@ export default {
       ctx.detail('unity', 'Scripting', `Mono (${managed.length} managed assemblies)`);
       const game = managed.filter((e) => /^Assembly-CSharp/i.test(e.name)).map((e) => e.name);
       if (game.length) ctx.detail('unity', 'Game code', game.join(', '));
+      // script data layouts come from the managed assemblies
+      ctx.state.unity.layouts = new MonoLayouts(async (name) => {
+        const e = managed.find((x) => x.name.replace(/\.dll$/i, '').toLowerCase() === name);
+        return e ? new DotNetModule(parsePE(await ctx.vfs.bytes(e))) : null;
+      }, { tpk: env.tpk, vkey: ctx.state.unity.vkey });
     }
 
     // ---- script data (MonoBehaviour / ScriptableObject fields) ----
@@ -386,7 +404,7 @@ export default {
       }
     }
     if (web) {
-      project.runnable = { kind: 'unity', label: 'Unity WebGL', webgl: true };
+      project.runnable = { kind: 'unity', label: 'Unity WebGL', webgl: true }; // replaces the desktop entry for web builds
       project.actions.push({ id: 'unity.repackInfo', label: 'How edits are applied', description: 'Replaced textures and sprites, edited text assets and IL2CPP string literals are written back into the game files when you press Play or export.' });
     }
     const mainScene = project.scenes[0];
@@ -395,7 +413,8 @@ export default {
 
   async prepareRun(ctx) {
     const st = ctx.state.unity;
-    if (!st || !st.web) return null;
+    if (!st) return null;
+    if (!st.web) return st.desktop ? { reason: DESKTOP_PLAY.replace(/\{exe\}/g, st.exe || 'the game'), desktop: true } : null;
     const web = st.web;
     if (!web.loader) return { reason: 'This Unity WebGL build is missing its loader script (*.loader.js), so it cannot be started.' };
     // web root = parent of the Build folder
@@ -513,8 +532,8 @@ async function listScriptData(ctx, env, files, scriptNames) {
       const ms = scriptFile ? scriptNames.get(scriptFile.split('/').pop().toLowerCase() + '|' + sp.m_PathID) : null;
       let tree = o.type && o.type.tree && o.type.tree.children.length > 4 ? o.type.tree : null;
       if (!tree && layouts && ms) {
-        const ti = layouts.findType(ms.m_AssemblyName, ms.m_Namespace, ms.m_ClassName);
-        const r = ti >= 0 ? layouts.tree(ti) : { error: 'its class is not in the IL2CPP metadata' };
+        const ti = await layouts.findType(ms.m_AssemblyName, ms.m_Namespace, ms.m_ClassName);
+        const r = ti != null && ti !== -1 ? await layouts.tree(ti) : { error: "its class is not in the game's code" };
         if (r.tree) tree = r.tree;
         else reasons.set(r.error, (reasons.get(r.error) || 0) + 1);
       }
@@ -552,7 +571,7 @@ async function listScriptData(ctx, env, files, scriptNames) {
   if (!total) return;
   ctx.detail('unity', 'Script data', `${listed.toLocaleString()} of ${total.toLocaleString()} MonoBehaviours editable${misfit ? ` · ${misfit.toLocaleString()} didn't match their layout` : ''}`);
   if (noLayout && !layouts && !files.some((f) => f.objects.some((o) => o.classId === 114 && o.type && o.type.tree && o.type.tree.children.length > 4))) {
-    ctx.note('info', 'Script values (MonoBehaviours) can be shown once the game code is readable: for IL2CPP builds that needs the WebAssembly or GameAssembly file next to the metadata.');
+    ctx.note('info', "Script values (MonoBehaviours) need the game's code to be read: the Managed folder's DLLs for Mono games, or the WebAssembly / GameAssembly file next to the IL2CPP metadata.");
   } else if (reasons.size) {
     const top = [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([r, n]) => `${r} (${n})`).join('; ');
     ctx.note('info', `Some script data can't be edited: ${top}.`);

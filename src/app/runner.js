@@ -66,8 +66,17 @@ export class GameView {
 
   idle(title = 'Press Play to run the game', text = 'ReSourcefy rebuilds the game from the files in the Project and Build folders, including your edits, and runs it here in a sandbox.') {
     clear(this.overlay);
-    this.overlay.append(h('h3', null, title), h('p', null, text));
     const r = this.app.project && this.app.project.runnable;
+    if (r && r.desktop && title === 'Press Play to run the game') {
+      title = `A ${r.label || 'desktop'} game`;
+      text = `Programs made for ${r.label || 'desktop computers'} can't run inside a web page, so this game can't be played here. Download a playable copy instead (the whole game with your edits), unzip it, and start ${r.exe || 'the game'} on your computer.`;
+      this.overlay.append(h('h3', null, title), h('p', null, text));
+      this.desktopActions();
+      this.overlay.hidden = false;
+      this.updateMissing();
+      return;
+    }
+    this.overlay.append(h('h3', null, title), h('p', null, text));
     if (r) this.overlay.append(h('button', { class: 'btn primary', onclick: () => this.start() }, h('span', { html: icons.play }), 'Play ' + (r.label || '')));
     this.overlay.hidden = false;
     this.updateMissing();
@@ -112,6 +121,7 @@ export class GameView {
     this.updateMissing();
     if (!run || !run.files) {
       this.fail(run && run.reason ? run.reason : 'This build has no web version that can run in the browser.', true);
+      if (run && run.desktop) this.desktopActions();
       return;
     }
     let files = run.files;
@@ -174,6 +184,16 @@ export class GameView {
     } else if (m.type === 'failed') {
       this.fail(m.msg);
     }
+  }
+
+  // desktop games can't run here: offer the copies that can
+  desktopActions() {
+    const p = this.app.project || {};
+    const edited = (this.app.listing || []).some((x) => x.modified);
+    this.overlay.querySelector('button.btn.primary')?.remove();
+    this.overlay.append(h('div', { class: 'row-actions' },
+      h('button', { class: 'btn primary', onclick: () => this.app.exportScope('fullgame') }, h('span', { html: icons.download }), `Download playable copy${p.platform ? ' for ' + p.platform : ''}`),
+      edited ? h('button', { class: 'btn', onclick: () => this.app.exportScope('game') }, 'Only the changed files') : null));
   }
 
   fail(msg, info = false) {

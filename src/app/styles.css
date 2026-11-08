@@ -481,3 +481,4 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ov-change { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ov-change .linkish { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-align: left; font-size: 12px; }
 .ov-tool-icon svg { width: 20px; height: 20px; }
+.game-overlay .row-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }

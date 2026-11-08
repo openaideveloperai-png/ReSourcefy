@@ -699,9 +699,10 @@ class App {
       title: 'Export',
       body: h('div', { style: { display: 'grid', gap: '10px' } },
         h('p', null, 'Files are packed into a .zip in your browser and saved through the artifact\'s download prompt.'),
-        this.project.runnable ? h('button', { class: 'btn primary', onclick: () => this.exportGame() }, 'Playable game with your edits') : null,
+        this.project.runnable ? h('button', { class: 'btn primary', onclick: () => this.exportGame() }, this.project.runnable.desktop ? `Playable copy for ${this.project.platform || 'desktop'} (the whole game with your edits)` : 'Playable game with your edits') : null,
         h('button', { class: 'btn', onclick: () => this.exportScope('project') }, 'Recovered project (Project folder)'),
-        h('button', { class: 'btn', disabled: !modifiedCount, onclick: () => this.exportScope('modified') }, `Modified files only (${modifiedCount})`),
+        h('button', { class: 'btn', disabled: !modifiedCount, onclick: () => this.exportScope('game'), title: 'Only the game files that changed, rebuilt with your edits, to copy over the original game folder' }, 'Game files with your edits (copy over the game folder)'),
+        h('button', { class: 'btn', disabled: !modifiedCount, onclick: () => this.exportScope('modified') }, `Edited files as you see them here (${modifiedCount})`),
         h('button', { class: 'btn', onclick: () => this.exportScope('all') }, 'Everything (original + recovered)'),
         h('button', { class: 'btn', onclick: () => copyText(JSON.stringify(analysisJSON(this.project), null, 2)) }, 'Copy analysis JSON'),
       ),
@@ -715,7 +716,7 @@ class App {
     this.progress('Packing files', 0.1);
     try {
       const r = await this.engine.call('exportFiles', { scope });
-      const name = `${(this.project.name || 'game').replace(/[\\/:*?"<>|]+/g, '_')}-${scope}.zip`;
+      const name = `${(this.project.name || 'game').replace(/[\\/:*?"<>|]+/g, '_')}-${{ fullgame: 'playable', game: 'changed-files' }[scope] || scope}.zip`;
       const res = await saveFile(name, r.blob);
       this.toast(res.ok ? `${res.message} (${r.count} files)` : res.message, { error: !res.ok });
     } catch (e) {
@@ -727,6 +728,7 @@ class App {
   async exportGame() {
     document.querySelector('.modal-back')?.remove();
     if (!this.project || !this.project.runnable) { this.toast('This game has no web version to download.'); return; }
+    if (this.project.runnable.desktop) { await this.exportScope('fullgame'); return; }
     await this.saveAllTabs();
     this.progress('Building the game', 0.05);
     try {

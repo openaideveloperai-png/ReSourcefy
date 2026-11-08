@@ -6,6 +6,7 @@ import { converters } from './converters.js';
 import { sniffBytes, sniffName, looksLikeText } from './sniff.js';
 import { utf8, utf16le, latin1 } from './util/binary.js';
 import { zipFiles } from './util/zipwrite.js';
+import { zipBlob } from './util/zipblob.js';
 
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 400000;
@@ -363,7 +364,13 @@ export async function prepareRun(ctx, params) {
 
 export async function exportFiles(ctx, { scope = 'modified', paths, root = '' }) {
   let list;
+  // 'game': only the game's own files that changed (rebuilt with the edits), laid out like the
+  // uploaded folder, to copy over the original game
+  const full = scope === 'fullgame'; // the whole uploaded game, with the changed files rebuilt
+  const game = scope === 'game' || full;
   if (paths && paths.length) list = paths.map((p) => ctx.vfs.get(p)).filter(Boolean);
+  else if (full) list = ctx.vfs.filter((e) => e.origin === 'build' && !e.ref);
+  else if (game) list = ctx.vfs.modified().filter((e) => e.origin === 'build');
   else if (scope === 'modified') list = ctx.vfs.modified();
   else if (scope === 'project') list = ctx.vfs.list('Project');
   else if (scope === 'folder') list = ctx.vfs.list(root);
@@ -371,25 +378,36 @@ export async function exportFiles(ctx, { scope = 'modified', paths, root = '' })
   // Rebuilt containers (e.g. repacked .pck) are produced by engines on request.
   for (const eng of engines) {
     if (eng.beforeExport) {
-      const extra = await eng.beforeExport(ctx, { scope, list });
-      if (extra) list.push(...extra);
+      const extra = await eng.beforeExport(ctx, { scope: game ? 'modified' : scope, list });
+      if (extra) {
+        for (const x of extra) {
+          // a rebuilt file replaces the edited original in the list
+          const i = list.findIndex((e) => e.path === x.path);
+          if (i >= 0) list[i] = x; else list.push(x);
+        }
+      }
     }
   }
+  if (game && !list.length) throw new Error("Nothing you changed goes into the game's own files yet.");
   const files = [];
   let n = 0;
   for (const e of list) {
-    // Skip containers whose children are also exported, so zips don't double up.
     try {
-      files.push({ path: e.exportPath || e.path, data: await ctx.vfs.bytes(e) });
+      const data = e.exportPath && e.data ? e.data : await ctx.vfs.blob(e); // rebuilt files carry their data
+      let path = e.exportPath || e.path;
+      if (game) path = path.replace(/^Build\//, '');
+      files.push({ path, data });
     } catch (err) {
       ctx.warn(`Skipped ${e.path}: ${err.message}`);
     }
     if (++n % 200 === 0) { ctx.progress(`Packing ${n}/${list.length}`, n / list.length); await ctx.yield(); }
   }
-  ctx.progress('Compressing', 0.95);
-  const zip = zipFiles(files);
+  if (full) files.push({ path: 'README (ReSourcefy).txt', data: new Blob(['This is the whole game with your edits, exported by ReSourcefy.\r\nUnzip it anywhere and start the game from this folder as usual (for example the .exe on Windows).\r\n']) });
+  else if (game) files.push({ path: 'README.txt', data: new Blob(['These are the game files that changed, rebuilt with your edits.\r\nCopy them over your game folder (replace the files when asked), then start the game as usual.\r\nKeep a backup of the original folder in case you want to go back.\r\n']) });
+  const blob = await zipBlob(files, { onProgress: (f) => ctx.progress('Packing files', f) });
   ctx.progress(null, 1);
-  return { blob: new Blob([zip], { type: 'application/zip' }), count: files.length };
+  void zipFiles;
+  return { blob, count: files.length };
 }
 
 // Drop parsed-file caches (they are rebuilt on demand), e.g. before a game starts.

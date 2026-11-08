@@ -4,6 +4,7 @@
 // reading it with the layout consumes exactly the object's bytes and writing it back gives the
 // same bytes.
 import { classTree } from './typetree.js';
+import { T as MT, parseSig } from '../../formats/dotnet.js';
 
 const ALIGN = 0x4000;
 const node = (type, name, children = [], metaFlag = 0) => ({ type, name, metaFlag, children, byteSize: -1, level: 0, version: 1, typeFlags: 0 });
@@ -322,4 +323,236 @@ export function fromEditable(n, v, path = n.name) {
     return o;
   }
   return v;
+}
+
+// ---------------- Mono builds: layouts from the managed assemblies ----------------
+
+const CIL_PRIMS = {
+  bool: ['bool', true], char: ['UInt16', true], sbyte: ['SInt8', true], byte: ['UInt8', true], short: ['SInt16', true], ushort: ['UInt16', true],
+  int: ['int', false], uint: ['UInt32', false], long: ['SInt64', false], ulong: ['UInt64', false], float: ['float', false], double: ['double', false],
+};
+
+export class MonoLayouts {
+  // loadModule(assemblyName) -> Promise<DotNetModule | null>
+  constructor(loadModule, { tpk, vkey }) {
+    this.load = loadModule;
+    this.tpk = tpk;
+    this.vkey = vkey;
+    this.mods = new Map();
+    this.names = new WeakMap();
+    this.cache = new Map();
+    this.objCache = new Map();
+    this.tpkNodes = new Map();
+  }
+
+  get usable() { return true; }
+
+  mod(asm) {
+    const key = String(asm || '').replace(/\.dll$/i, '').toLowerCase();
+    if (!this.mods.has(key)) this.mods.set(key, Promise.resolve().then(() => this.load(key)).catch(() => null));
+    return this.mods.get(key);
+  }
+
+  typeIndex(mod) {
+    let m = this.names.get(mod);
+    if (!m) {
+      m = new Map();
+      const enclosing = mod.index().enclosing;
+      for (let i = 1; i <= mod.count(MT.TypeDef); i++) {
+        if (enclosing.has(i)) continue;
+        const td = mod.row(MT.TypeDef, i);
+        m.set(`${mod.str(td.Namespace)}|${mod.str(td.Name)}`, i);
+      }
+      this.names.set(mod, m);
+    }
+    return m;
+  }
+
+  key(h) { return `${h.mod.assemblyName().name}|${h.ti}`; }
+  fullName(h) { const td = h.mod.row(MT.TypeDef, h.ti); const ns = h.mod.str(td.Namespace); return (ns ? ns + '.' : '') + h.mod.str(td.Name); }
+  shortName(h) { return h.mod.str(h.mod.row(MT.TypeDef, h.ti).Name).replace(/`\d+$/, ''); }
+
+  async findType(asm, ns, name) {
+    const mod = await this.mod(asm);
+    if (!mod) return -1;
+    const ti = this.typeIndex(mod).get(`${ns || ''}|${name}`);
+    return ti ? { mod, ti } : -1;
+  }
+
+  // a TypeDefOrRef reference in `mod`, followed into other assemblies and type forwards
+  async resolve(mod, table, index) {
+    if (!index) return null;
+    if (table === MT.TypeDef) return { mod, ti: index };
+    if (table !== MT.TypeRef) return null;
+    const tr = mod.row(MT.TypeRef, index);
+    const name = mod.str(tr.Name), ns = mod.str(tr.Namespace), scope = tr.ResolutionScope;
+    if (scope.table === MT.TypeRef) {
+      const outer = await this.resolve(mod, MT.TypeRef, scope.index);
+      if (!outer) return null;
+      const kids = outer.mod.index().nested.get(outer.ti) || [];
+      const ti = kids.find((k) => outer.mod.str(outer.mod.row(MT.TypeDef, k).Name) === name);
+      return ti ? { mod: outer.mod, ti } : null;
+    }
+    const target = scope.table === MT.AssemblyRef ? await this.mod(mod.str(mod.row(MT.AssemblyRef, scope.index).Name)) : mod;
+    return target ? this.findIn(target, ns, name, 0) : null;
+  }
+
+  async findIn(mod, ns, name, depth) {
+    const ti = this.typeIndex(mod).get(`${ns}|${name}`);
+    if (ti) return { mod, ti };
+    if (depth > 4) return null;
+    for (let i = 1; i <= mod.count(MT.ExportedType); i++) {
+      const et = mod.row(MT.ExportedType, i);
+      if (mod.str(et.Name) !== name || mod.str(et.Namespace) !== ns || et.Implementation.table !== MT.AssemblyRef) continue;
+      const m2 = await this.mod(mod.str(mod.row(MT.AssemblyRef, et.Implementation.index).Name));
+      if (m2) return this.findIn(m2, ns, name, depth + 1);
+    }
+    return null;
+  }
+
+  // the base class of h with its generic arguments: { h, args } | null
+  async baseOf(h, args) {
+    const ext = h.mod.row(MT.TypeDef, h.ti).Extends;
+    if (!ext || !ext.index) return null;
+    if (ext.table === MT.TypeSpec) {
+      const sig = parseSig(h.mod, h.mod.row(MT.TypeSpec, ext.index).Signature, 'typespec');
+      if (sig.k !== 'generic') return null;
+      const bh = await this.resolve(h.mod, sig.base.tok, sig.base.idx);
+      return bh ? { h: bh, args: sig.args.map((a) => ({ sig: a, mod: h.mod, args })) } : null;
+    }
+    const bh = await this.resolve(h.mod, ext.table, ext.index);
+    return bh ? { h: bh, args: [] } : null;
+  }
+
+  baseName(h) {
+    const ext = h.mod.row(MT.TypeDef, h.ti).Extends;
+    if (!ext || ext.table !== MT.TypeRef || !ext.index) return '';
+    const tr = h.mod.row(MT.TypeRef, ext.index);
+    return `${h.mod.str(tr.Namespace)}.${h.mod.str(tr.Name)}`;
+  }
+
+  async isUnityObject(h) {
+    const k = this.key(h);
+    if (this.objCache.has(k)) return this.objCache.get(k);
+    let cur = h, result = false;
+    for (let d = 0; d < 32 && cur; d++) {
+      if (this.fullName(cur) === 'UnityEngine.Object') { result = true; break; }
+      const b = await this.baseOf(cur, []);
+      cur = b && b.h;
+    }
+    this.objCache.set(k, result);
+    return result;
+  }
+
+  attrNames(mod, table, index) {
+    const ix = mod.index();
+    const names = new Set();
+    for (const ca of ix.attrs.get(table * 16777216 + index) || []) {
+      let owner = null;
+      if (ca.Type.table === MT.MethodDef) owner = { table: MT.TypeDef, index: ix.methodOwner[ca.Type.index] };
+      else if (ca.Type.table === MT.MemberRef) owner = mod.row(MT.MemberRef, ca.Type.index).Class;
+      if (!owner || !owner.index) continue;
+      if (owner.table === MT.TypeRef) names.add(mod.str(mod.row(MT.TypeRef, owner.index).Name));
+      else if (owner.table === MT.TypeDef) names.add(mod.str(mod.row(MT.TypeDef, owner.index).Name));
+    }
+    return names;
+  }
+
+  fromTpk(typeName) { return ScriptLayouts.prototype.fromTpk.call(this, typeName); }
+
+  async fieldsOf(h, args, depth) {
+    if (depth > 8) throw new Unsupported('fields nest too deeply');
+    const chain = [];
+    let cur = { h, args };
+    for (let d = 0; d < 32 && cur; d++) {
+      const name = this.fullName(cur.h);
+      if (/^UnityEngine\.(MonoBehaviour|ScriptableObject|Behaviour|Component|Object)$/.test(name) || name === 'System.Object' || name === 'System.ValueType') break;
+      chain.push(cur);
+      cur = await this.baseOf(cur.h, cur.args);
+    }
+    const out = [];
+    for (const { h: t, args: a } of chain.reverse()) {
+      const [fs, fe] = t.mod.listRange(MT.TypeDef, t.ti, 'FieldList', MT.Field);
+      for (let fi = fs; fi < fe; fi++) {
+        const f = t.mod.row(MT.Field, fi);
+        if (f.Flags & 0x10 || f.Flags & 0x40 || f.Flags & 0x20 || f.Flags & 0x80) continue; // static, const, readonly, [NonSerialized]
+        const names = this.attrNames(t.mod, MT.Field, fi);
+        if (names.has('SerializeReference')) throw new Unsupported('[SerializeReference] fields are not supported yet');
+        if ((f.Flags & 7) !== 6 && !names.has('SerializeField')) continue;
+        const n = await this.nodeFor({ sig: parseSig(t.mod, f.Signature, 'field'), mod: t.mod, args: a }, t.mod.str(f.Name), depth, false);
+        if (n) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  async nodeFor(t, name, depth, inArray) {
+    const { sig, mod } = t;
+    if (!sig) return null;
+    if (sig.k === 'var') { const a = t.args && t.args[sig.n]; return a ? this.nodeFor(a, name, depth, inArray) : null; }
+    if (sig.k === 'prim') {
+      if (sig.name === 'string') return leaf('string', name);
+      const p = CIL_PRIMS[sig.name];
+      return p ? leaf(p[0], name, p[1] && !inArray) : null;
+    }
+    if (sig.k === 'szarray') {
+      if (inArray) return null; // arrays of arrays are not serialized
+      const en = await this.nodeFor({ sig: sig.t, mod, args: t.args }, 'data', depth + 1, true);
+      return en ? arrayOf(name, en) : null;
+    }
+    let h = null, args = [];
+    if (sig.k === 'generic') {
+      h = await this.resolve(mod, sig.base.tok, sig.base.idx);
+      args = sig.args.map((a) => ({ sig: a, mod, args: t.args }));
+    } else if (sig.k === 'class' || sig.k === 'valuetype') h = await this.resolve(mod, sig.tok, sig.idx);
+    if (!h) return null;
+    const full = this.fullName(h);
+    if (BUILTIN[full]) return BUILTIN[full](name);
+    if (FROM_TPK[full]) {
+      const n = this.fromTpk(FROM_TPK[full]);
+      if (!n) throw new Unsupported(`no layout for ${full} in this Unity version`);
+      return { ...n, name };
+    }
+    if (full === 'System.Collections.Generic.List`1') {
+      if (inArray) return null;
+      const en = await this.nodeFor(args[0], 'data', depth + 1, true);
+      return en ? arrayOf(name, en) : null;
+    }
+    const td = h.mod.row(MT.TypeDef, h.ti);
+    const base = this.baseName(h);
+    if (base === 'System.Enum') {
+      // enum: stored as its underlying integer
+      const [fs, fe] = h.mod.listRange(MT.TypeDef, h.ti, 'FieldList', MT.Field);
+      for (let fi = fs; fi < fe; fi++) {
+        const f = h.mod.row(MT.Field, fi);
+        if (f.Flags & 0x10) continue;
+        const s = parseSig(h.mod, f.Signature, 'field');
+        const p = s.k === 'prim' && CIL_PRIMS[s.name];
+        if (p) return leaf(p[0], name, p[1] && !inArray);
+      }
+      return leaf('int', name);
+    }
+    const isValue = base === 'System.ValueType';
+    if (!isValue && await this.isUnityObject(h)) return pptr(name, this.shortName(h));
+    const serializable = (td.Flags & 0x2000) !== 0, isInterface = (td.Flags & 0x20) !== 0, isAbstract = (td.Flags & 0x80) !== 0;
+    if (!serializable || isInterface || (isAbstract && !isValue)) return null;
+    if (/^System\./.test(full)) return null;
+    return node(this.shortName(h), name, await this.fieldsOf(h, args, depth + 1));
+  }
+
+  async tree(h) {
+    const k = this.key(h);
+    if (this.cache.has(k)) return this.cache.get(k);
+    let res;
+    try {
+      const base = classTree(this.tpk, 114, this.vkey);
+      if (!base) throw new Unsupported('no MonoBehaviour layout for this Unity version');
+      res = { tree: { ...base, children: [...base.children, ...await this.fieldsOf(h, [], 0)] } };
+    } catch (err) {
+      if (!(err instanceof Unsupported)) console.warn(err);
+      res = { error: err.message };
+    }
+    this.cache.set(k, res);
+    return res;
+  }
 }
