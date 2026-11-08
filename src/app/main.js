@@ -10,6 +10,7 @@ import { imageViewer, audioViewer, videoViewer, fontViewer } from './viewers/med
 import { hexViewer } from './viewers/hex.js';
 import { GameView } from './runner.js';
 import { filesFromDataTransfer, pickFiles } from './ingest.js';
+import { placeFiles } from './missing.js';
 import { saveFile, extAllowed, askClaude, getSample } from './caps.js';
 import { sampleGameFiles } from './sample.js';
 
@@ -182,7 +183,9 @@ class App {
       depth = 0;
       this.dropOverlay.classList.remove('on');
       const files = await filesFromDataTransfer(e.dataTransfer);
-      if (files.length) this.ingest(files);
+      if (!files.length) return;
+      if (this.project && this.project.loaded && !this.project.sample) this.askDrop(files);
+      else this.ingest(files);
     });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) { e.preventDefault(); this.togglePlay(); }
@@ -318,6 +321,57 @@ class App {
     this.tabs.activate('overview');
     const first = this.project.mainFile;
     if (first) this.openFile(first, { background: true });
+  }
+
+  // Files dropped while a game is open: add them to it (e.g. its StreamingAssets folder) or open a new game.
+  askDrop(files) {
+    const missing = this.missingPaths();
+    const placed = placeFiles(files, this.webRoot(), missing, '');
+    const looksLikeAddition = files.some((f) => /(^|\/)StreamingAssets\//i.test(f.path)) || placed.some((p) => missing.some((m) => p.path.endsWith('/' + m)));
+    const n = files.length;
+    modal({
+      title: 'Add to this game?',
+      body: h('p', null, `Add ${n === 1 ? 'this file' : `these ${n.toLocaleString()} files`} to ${this.project.name}${looksLikeAddition ? ' (they look like files it is missing)' : ''}, or open ${n === 1 ? 'it' : 'them'} as a new game?`),
+      actions: [
+        { label: 'Cancel', value: null },
+        { label: 'Open as a new game', primary: !looksLikeAddition, run: () => { this.ingest(files); } },
+        { label: 'Add to this game', primary: looksLikeAddition, run: () => { this.addFiles(placed, { play: looksLikeAddition && !!this.project.runnable }); } },
+      ],
+    });
+  }
+
+  // Folder the running game is served from (where its StreamingAssets folder belongs).
+  webRoot() {
+    return (this.game && this.game.run && this.game.run.root) ?? this.project.webRoot ?? 'Build/';
+  }
+
+  missingPaths() {
+    const out = new Set(((this.project && this.project.missing) || []).map((m) => m.path));
+    if (this.game) for (const p of this.game.missing.keys()) out.add(p);
+    return [...out];
+  }
+
+  // Add files to the open game (keeping edits) and analyze it again.
+  async addFiles(files, { play = false } = {}) {
+    if (!files.length) return;
+    if (this.game) this.game.stop(true);
+    const total = files.reduce((a, f) => a + f.blob.size, 0);
+    this.log('info', `Adding ${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'} (${formatBytes(total)})…`);
+    this.progress('Adding files', 0);
+    try {
+      await this.saveAllTabs();
+      this.tabs.closeAll((t) => t.id !== 'game');
+      const snap = await this.engine.call('addFiles', { files });
+      this.applySnapshot(snap);
+      const left = (this.project.missing || []).length;
+      this.toast(`Added ${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'}${left ? ` · ${left} still missing` : ''}`);
+      if (play) this.play();
+    } catch (e) {
+      this.log('error', 'Adding files failed: ' + e.message);
+      this.toast('Adding files failed: ' + e.message, { error: true });
+    } finally {
+      this.progress(null);
+    }
   }
 
   async reanalyze() {

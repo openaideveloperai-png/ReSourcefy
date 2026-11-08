@@ -398,3 +398,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .project-id { border-left: 0; padding-left: 0; }
   .tb-actions .btn:not(.keep) { display: none; }
 }
+
+/* missing files */
+.btn.sm.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.modal.wide { width: min(720px, 100%); }
+.modal h4 { margin: 4px 0 0; font: 600 13px/1.3 var(--font-display); letter-spacing: .02em; }
+.modal .row.start { justify-content: flex-start; }
+.modal .small { font-size: var(--fs-xs); }
+.modal .warn-text { color: var(--warn); }
+.missing-dialog { display: grid; gap: 10px; min-width: 0; }
+.missing-list { max-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--sunken); padding: 6px 8px; font-size: 12px; display: grid; gap: 2px; }
+.missing-list code, .missing-dialog p code { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.missing-out { display: grid; gap: 10px; min-width: 0; }
+.cmd-block { display: grid; gap: 4px; min-width: 0; }
+.cmd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-xs); color: var(--muted); }
+.modal textarea.cmd { resize: vertical; white-space: pre; overflow: auto; font-size: 11px; line-height: 1.5; }
+.missing-links { display: grid; gap: 2px; padding: 6px 0 0; font-family: var(--font-mono); font-size: 12px; }
+.missing-links a { color: var(--accent); overflow-wrap: anywhere; }

@@ -199,6 +199,31 @@ import * as FakeIDB from 'fake-indexeddb';
     return lookup(path) || lookup(entryDir + path) || null;
   }
   const decodeSafe = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+
+  // The game-relative path of a URL inside the game's own folder (whether or not the file exists).
+  function localPath(url, base) {
+    if (url == null) return null;
+    if (typeof url === 'object') url = url.url || url.href || String(url);
+    url = String(url).trim();
+    if (!url || /^(data:|javascript:|about:|blob:)/.test(url)) return null;
+    let abs;
+    try { abs = new URL(url, base || VBASE + entryDir); } catch { return null; }
+    let path;
+    if (abs.origin === 'https://game.local') path = abs.pathname.slice(1);
+    else if (realBase && abs.href.startsWith(realBase)) path = entryDir + abs.href.slice(realBase.length);
+    else return null;
+    return norm(decodeSafe(path.replace(/[?#].*$/, ''))) || null;
+  }
+
+  // Files the game asked for that aren't in the build are reported to the editor in batches.
+  const missingSeen = new Set();
+  let missingQueue = [], missingTimer = 0;
+  function reportMissing(path) {
+    if (!path || missingSeen.has(path) || missingSeen.size > 2000) return;
+    missingSeen.add(path);
+    missingQueue.push(path);
+    if (!missingTimer) missingTimer = setTimeout(() => { missingTimer = 0; post({ type: 'missing', paths: missingQueue }); missingQueue = []; }, 300);
+  }
   let realBase = '';
   try { realBase = document.baseURI.replace(/[^/]*$/, ''); } catch { /* ignore */ }
 
@@ -222,7 +247,9 @@ import * as FakeIDB from 'fake-indexeddb';
   }
   function mapUrl(url, base) {
     const p = resolve(url, base);
-    return p ? urlFor(p) : url;
+    if (p) return urlFor(p);
+    reportMissing(localPath(url, base));
+    return url;
   }
 
   // ---------------- CSS ----------------
@@ -302,14 +329,46 @@ import * as FakeIDB from 'fake-indexeddb';
         const blob = files.get(p);
         return Promise.resolve(new Response(blob, { status: 200, headers: { 'Content-Type': blob.type || mimeOf(p), 'Content-Length': String(blob.size) } }));
       }
+      // a file of the game that wasn't uploaded: answer like a web server would
+      const miss = localPath(url);
+      if (miss) {
+        reportMissing(miss);
+        return Promise.resolve(new Response('Not found: ' + miss, { status: 404, statusText: 'Not Found', headers: { 'Content-Type': 'text/plain' } }));
+      }
       return origFetch(input, init);
     };
 
     const xo = XMLHttpRequest.prototype.open;
+    const xsend = XMLHttpRequest.prototype.send;
+    const emptyUrl = URL.createObjectURL(new Blob([]));
+    ourUrls.add(emptyUrl);
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
       const s = String(url);
+      this.__rsfMissing = null;
       if (s.startsWith('data:')) return xo.call(this, method, dataToBlobUrl(s), ...rest);
-      return xo.call(this, method, mapUrl(s), ...rest);
+      const p = resolve(s);
+      if (p) return xo.call(this, method, urlFor(p), ...rest);
+      const miss = localPath(s);
+      if (miss) { this.__rsfMissing = miss; this.__rsfSync = rest[0] === false; return xo.call(this, method, emptyUrl, ...rest); }
+      return xo.call(this, method, s, ...rest);
+    };
+    // A request for a missing file finishes with 404 Not Found, as it would on a web server.
+    XMLHttpRequest.prototype.send = function (body) {
+      const miss = this.__rsfMissing;
+      if (!miss) return xsend.call(this, body);
+      reportMissing(miss);
+      const xhr = this, rt = xhr.responseType;
+      const response = rt === 'arraybuffer' ? new ArrayBuffer(0) : rt === 'blob' ? new Blob([]) : rt === 'json' || rt === 'document' ? null : 'Not found';
+      const def = (k, v) => { try { Object.defineProperty(xhr, k, { configurable: true, get: () => v }); } catch { /* ignore */ } };
+      const finish = () => {
+        def('readyState', 4); def('status', 404); def('statusText', 'Not Found'); def('response', response); def('responseURL', VBASE + miss);
+        if (!rt || rt === 'text') def('responseText', 'Not found');
+        xhr.getAllResponseHeaders = () => 'content-type: text/plain\r\n';
+        xhr.getResponseHeader = (n) => (String(n).toLowerCase() === 'content-type' ? 'text/plain' : null);
+        xhr.dispatchEvent(new Event('readystatechange'));
+        for (const t of ['load', 'loadend']) xhr.dispatchEvent(new ProgressEvent(t, { loaded: 0, total: 0 }));
+      };
+      if (xhr.__rsfSync) finish(); else setTimeout(finish, 0);
     };
 
     const patchProp = (proto, prop, mapper = (v) => mapUrl(v)) => {

@@ -116,6 +116,46 @@ function findWebGL(ctx) {
   return r;
 }
 
+// Folder the game's page is served from: the parent of the Build folder.
+function webRootOf(web) {
+  const buildDir = web.dir.replace(/\/$/, '');
+  return buildDir.includes('/') ? buildDir.slice(0, buildDir.lastIndexOf('/') + 1) : '';
+}
+
+// Files a WebGL build loads at run time from next to its Build folder (mostly StreamingAssets)
+// that aren't in the upload. Addressables are followed settings.json -> catalog -> bundles.
+async function expectedWebFiles(ctx, root, assemblies) {
+  const out = [];
+  const lower = new Map();
+  for (const e of ctx.vfs.list(root.replace(/\/$/, '') || 'Build')) if (e.origin === 'build') lower.set(e.path.slice(root.length).toLowerCase(), e);
+  const has = (rel) => lower.get(rel.toLowerCase());
+  const want = (rel, why) => { if (!has(rel) && !out.some((m) => m.path === rel)) out.push({ path: rel, why }); };
+  const uses = (re) => assemblies.some((n) => re.test(n));
+  const json = async (e) => { try { return JSON.parse(await ctx.vfs.text(e)); } catch { return null; } };
+  const RUNTIME = '{UnityEngine.AddressableAssets.Addressables.RuntimePath}';
+  const aaPath = (id) => (typeof id === 'string' && id.startsWith(RUNTIME) ? 'StreamingAssets/aa' + id.slice(RUNTIME.length).replace(/\\/g, '/') : null);
+  if (uses(/^Unity\.Addressables\.dll$/i) || has('StreamingAssets/aa/settings.json')) {
+    const settings = has('StreamingAssets/aa/settings.json');
+    if (!settings) want('StreamingAssets/aa/settings.json', 'Addressables settings');
+    else {
+      const st = await json(settings);
+      const catalogs = ((st && st.m_CatalogLocations) || []).map((c) => aaPath(c && c.m_InternalId)).filter(Boolean);
+      for (const c of catalogs.length ? catalogs : ['StreamingAssets/aa/catalog.json']) want(c, 'Addressables catalog');
+      for (const c of catalogs) {
+        const ce = has(c);
+        if (!ce || !/\.json$/i.test(c)) continue;
+        const cat = await json(ce);
+        for (const id of (cat && cat.m_InternalIds) || []) {
+          const rel = aaPath(id);
+          if (rel && /\.(bundle|unity3d|assetbundle|hash|json|bin)$/i.test(rel)) want(rel, 'listed in the Addressables catalog');
+        }
+      }
+    }
+  }
+  if (uses(/^Unity\.Services\.Core/i)) want('StreamingAssets/UnityServicesProjectConfiguration.json', 'Unity Services settings');
+  return out;
+}
+
 // The decompressed form of a (possibly) compressed build file.
 function unwrapped(ctx, e) {
   if (!e) return null;
@@ -326,6 +366,16 @@ export default {
       if (game.length) ctx.detail('unity', 'Game code', game.join(', '));
     }
 
+    if (web && web.loader) {
+      const root = webRootOf(web);
+      project.webRoot = root;
+      const assemblies = [...(ctx.state.unity.assemblies || []), ...managed.map((e) => e.name)];
+      try { project.missing = await expectedWebFiles(ctx, root, assemblies); } catch { project.missing = []; }
+      if (project.missing.length) {
+        const n = project.missing.length;
+        ctx.note('warn', `The game loads ${n === 1 ? 'a file' : n + ' files'} at run time that ${n === 1 ? "isn't" : "aren't"} in the upload (${project.missing.slice(0, 3).map((m) => m.path).join(', ')}${n > 3 ? ', …' : ''}). They sit next to the Build folder on the game's website; the Game view's “Missing files” button shows how to get them.`);
+      }
+    }
     if (web) {
       project.runnable = { kind: 'unity', label: 'Unity WebGL', webgl: true };
       project.actions.push({ id: 'unity.repackInfo', label: 'How edits are applied', description: 'Edited text assets and IL2CPP string literals are written back into the build when you press Play or export.' });
@@ -340,8 +390,7 @@ export default {
     const web = st.web;
     if (!web.loader) return { reason: 'This Unity WebGL build is missing its loader script (*.loader.js), so it cannot be started.' };
     // web root = parent of the Build folder
-    const buildDir = web.dir.replace(/\/$/, '');
-    const root = buildDir.includes('/') ? buildDir.slice(0, buildDir.lastIndexOf('/') + 1) : '';
+    const root = webRootOf(web);
     const index = ctx.vfs.find((e) => e.path === root + 'index.html' && e.origin === 'build');
     const files = {};
     const inner = new Set(['compressed', 'unityweb', 'unitybundle']);
@@ -382,7 +431,7 @@ createUnityInstance(document.querySelector('#unity-canvas'), {
 </script></body></html>`;
       files[entry] = new Blob([html], { type: 'text/html' });
     }
-    return { kind: 'unity', label: 'Unity WebGL', entry, files, notes };
+    return { kind: 'unity', label: 'Unity WebGL', entry, files, notes, root };
   },
 
   actions: {
@@ -468,6 +517,7 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
   ctx.detail('unity', 'IL2CPP metadata', `v${md.rawVersion}${md.rawVersion !== md.version ? ` (read as v${md.version})` : ''} · ${md.typeDefs.length.toLocaleString()} types · ${md.methodDefs.length.toLocaleString()} methods`);
   if (md.guessed) ctx.note('info', `global-metadata.dat says v${md.rawVersion}, but its tables match the v${md.version} layout, so it was read that way.`, metaEntry.path);
   const imageNames = md.images.map((im) => md.str(im.nameIndex));
+  ctx.state.unity.assemblies = imageNames;
   const gameImages = imageNames.filter((n) => !/^(mscorlib|System|Mono\.|UnityEngine|Unity\.|netstandard|Microsoft\.|__Generated)/i.test(n));
   ctx.detail('unity', 'Game assemblies', gameImages.join(', ') || '(none found)');
   // binary

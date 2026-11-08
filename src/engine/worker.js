@@ -23,6 +23,20 @@ const methods = {
     return snapshot();
   },
 
+  // Add files to the open game (e.g. a StreamingAssets folder it needs) and analyze again.
+  async addFiles({ files }) {
+    let bytes = 0;
+    for (const f of files) {
+      const rel = String(f.path).replace(/\\/g, '/').replace(/^\/+/, '');
+      const path = rel.startsWith('Build/') ? rel : 'Build/' + rel;
+      if (ctx.vfs.get(path)) ctx.vfs.remove(path);
+      ctx.vfs.add(path, f.blob, { origin: 'build', size: f.blob.size });
+      bytes += f.blob.size;
+    }
+    ctx.info(`Added ${files.length} file${files.length === 1 ? '' : 's'} (${formatBytes(bytes)}) to ${ctx.project.name}`);
+    return methods.reanalyze();
+  },
+
   async reanalyze() {
     // Keep only what the user uploaded (plus their edits) and run the pipeline again.
     for (const e of [...ctx.vfs.map.values()]) if (e.origin !== 'build') ctx.vfs.remove(e.path);

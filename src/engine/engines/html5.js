@@ -94,6 +94,6 @@ export default {
       const rel = e.path.slice(r.root.length);
       try { files[rel] = await ctx.vfs.blob(e); } catch (err) { ctx.warn(`Skipped ${rel}: ${err.message}`); }
     }
-    return { kind: 'html', label: r.label, entry: r.entry.slice(r.root.length), files };
+    return { kind: 'html', label: r.label, entry: r.entry.slice(r.root.length), files, root: r.root };
   },
 };
