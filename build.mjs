@@ -73,6 +73,7 @@ const loveDir = join(root, 'node_modules/love.js/src/compat');
 mkdirSync(join(vendor, 'love'), { recursive: true });
 for (const f of ['love.js', 'love.wasm']) cpSync(join(loveDir, f), join(vendor, 'love', f));
 cpSync(join(root, 'node_modules/love.js/LICENSE'), join(vendor, 'love', 'LICENSE.txt'));
+cpSync(join(root, 'node_modules/love.js/src/game.js'), join(vendor, 'love', 'game.template.js'));
 
 // Texture2DDecoder (WebAssembly) for ETC/EAC/ASTC/PVRTC/ATC/crunch textures.
 mkdirSync(join(vendor, 't2d'), { recursive: true });

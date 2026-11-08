@@ -4,6 +4,7 @@
 // pack in a bundled Godot web runtime; edited scripts, scenes, images and settings are
 // written into a rebuilt pack first.
 import { registerContainer } from '../../containers/index.js';
+import zipHandler from '../../containers/zip.js';
 import { registerConverter } from '../../converters.js';
 import { Reader, utf8, encodeUtf8 } from '../../util/binary.js';
 import { findPack, readPack, writePack } from './pck.js';
@@ -17,6 +18,14 @@ import { encodePNG, decodeImage } from '../../util/png.js';
 const EXE = /\.(exe|x86_64|x86_32|x86|arm64|arm32|64|32|bin)$|^[^.]+$/i;
 
 // ---------------- container ----------------
+// Executables can carry a payload: a Godot pack, or a zip (fused LÖVE games, self-extracting archives).
+async function trailingZip(blob) {
+  const n = Math.min(blob.size, 65557);
+  const tail = new Uint8Array(await blob.slice(blob.size - n).arrayBuffer());
+  for (let i = tail.length - 22; i >= 0; i--) if (tail[i] === 0x50 && tail[i + 1] === 0x4b && tail[i + 2] === 5 && tail[i + 3] === 6) return true;
+  return false;
+}
+
 registerContainer({
   id: 'godotpck',
   kinds: ['pck', 'pe', 'elf', 'macho', 'binary', 'data'],
@@ -24,7 +33,10 @@ registerContainer({
   async expand(ctx, e) {
     const blob = await ctx.vfs.blob(e);
     const start = await findPack(blob);
-    if (start < 0) return;
+    if (start < 0) {
+      if (e.kind !== 'pck' && await trailingZip(blob)) { await zipHandler.expand(ctx, e); e.embeddedZip = true; }
+      return;
+    }
     const pack = await readPack(blob, start);
     e.godotPack = { format: pack.format, version: pack.version, start, embedded: start > 0 || e.kind !== 'pck' };
     e.meta = { ...(e.meta || {}), 'Godot pack': `format ${pack.format}, Godot ${pack.version.join('.')}`, Files: String(pack.files.length) };

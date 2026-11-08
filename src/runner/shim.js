@@ -38,6 +38,11 @@ import * as FakeIDB from 'fake-indexeddb';
     const orig = console[level].bind(console);
     console[level] = (...args) => {
       orig(...args);
+      // drop %c styling (and its CSS arguments)
+      if (typeof args[0] === 'string' && args[0].includes('%c')) {
+        const n = (args[0].match(/%c/g) || []).length;
+        args = [args[0].replace(/%c/g, ''), ...args.slice(1 + n)];
+      }
       queueLog(level === 'debug' ? 'log' : level, args.map(fmt).join(' ').slice(0, 4000));
     };
   }
