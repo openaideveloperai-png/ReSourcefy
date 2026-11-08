@@ -224,7 +224,8 @@ const PRIM = {
   float: (r) => r.f32(), double: (r) => r.f64(), bool: (r) => r.u8_() !== 0,
 };
 
-export function readTyped(r, node, depth = 0) {
+// raw: strings come back as their bytes, so a value can be written back exactly.
+export function readTyped(r, node, depth = 0, raw = false) {
   if (depth > 64) throw new Error('type tree too deep');
   let align = (node.metaFlag & ALIGN) !== 0;
   let value;
@@ -233,14 +234,14 @@ export function readTyped(r, node, depth = 0) {
   if (prim) value = prim(r);
   else if (t === 'string') {
     const n = r.i32();
-    value = new TextDecoder().decode(r.bytes(n));
+    value = raw ? r.bytes(n).slice() : new TextDecoder().decode(r.bytes(n));
     r.align(4);
     align = false;
   } else if (t === 'TypelessData') {
     const n = r.i32();
     value = r.bytes(n);
   } else if (t === 'pair') {
-    value = [readTyped(r, node.children[0], depth + 1), readTyped(r, node.children[1], depth + 1)];
+    value = [readTyped(r, node.children[0], depth + 1, raw), readTyped(r, node.children[1], depth + 1, raw)];
   } else if (node.children.length && node.children[0].type === 'Array') {
     const arr = node.children[0];
     if (arr.metaFlag & ALIGN) align = true;
@@ -259,12 +260,61 @@ export function readTyped(r, node, depth = 0) {
       if (sub.metaFlag & ALIGN) r.align(4);
     } else {
       value = new Array(size);
-      for (let i = 0; i < size; i++) value[i] = readTyped(r, sub, depth + 1);
+      for (let i = 0; i < size; i++) value[i] = readTyped(r, sub, depth + 1, raw);
     }
   } else {
     value = {};
-    for (const c of node.children) value[c.name] = readTyped(r, c, depth + 1);
+    for (const c of node.children) value[c.name] = readTyped(r, c, depth + 1, raw);
   }
   if (align) r.align(4);
   return value;
+}
+
+// ---------------- generic value writer (the mirror of readTyped) ----------------
+const big = (v) => (typeof v === 'bigint' ? v : BigInt(typeof v === 'string' ? v : Math.round(Number(v) || 0)));
+const PRIMW = {
+  SInt8: (w, v) => w.u8((v | 0) & 0xff), UInt8: (w, v) => w.u8(v & 0xff), char: (w, v) => w.u8(v & 0xff),
+  SInt16: (w, v) => w.i16(v | 0), short: (w, v) => w.i16(v | 0), UInt16: (w, v) => w.u16(v & 0xffff), 'unsigned short': (w, v) => w.u16(v & 0xffff),
+  SInt32: (w, v) => w.i32(v | 0), int: (w, v) => w.i32(v | 0), UInt32: (w, v) => w.u32(v), 'unsigned int': (w, v) => w.u32(v), 'Type*': (w, v) => w.u32(v),
+  SInt64: (w, v) => { w.ensure(8); w.dv.setBigInt64(w.pos, big(v), w.le); w.bump(8); },
+  'long long': (w, v) => { w.ensure(8); w.dv.setBigInt64(w.pos, big(v), w.le); w.bump(8); },
+  UInt64: (w, v) => w.u64(big(v)), 'unsigned long long': (w, v) => w.u64(big(v)), FileSize: (w, v) => w.u64(big(v)),
+  float: (w, v) => w.f32(v), double: (w, v) => w.f64(v), bool: (w, v) => w.u8(v ? 1 : 0),
+};
+
+export function writeTyped(w, node, value, depth = 0) {
+  if (depth > 64) throw new Error('type tree too deep');
+  let align = (node.metaFlag & ALIGN) !== 0;
+  const t = node.type;
+  const prim = PRIMW[t];
+  if (prim) prim(w, value);
+  else if (t === 'string') {
+    const b = typeof value === 'string' ? new TextEncoder().encode(value) : value || new Uint8Array(0);
+    w.i32(b.length);
+    w.bytes(b);
+    w.align(4);
+    align = false;
+  } else if (t === 'TypelessData') {
+    const b = value || new Uint8Array(0);
+    w.i32(b.length);
+    w.bytes(b);
+  } else if (t === 'pair') {
+    writeTyped(w, node.children[0], value[0], depth + 1);
+    writeTyped(w, node.children[1], value[1], depth + 1);
+  } else if (node.children.length && node.children[0].type === 'Array') {
+    const arr = node.children[0];
+    if (arr.metaFlag & ALIGN) align = true;
+    const sub = arr.children[1];
+    const sp = PRIMW[sub.type];
+    const items = value || [];
+    w.i32(items.length);
+    if (sp && (sub.type === 'UInt8' || sub.type === 'char' || sub.type === 'SInt8')) w.bytes(items);
+    else if (sp) {
+      for (const v of items) sp(w, v);
+      if (sub.metaFlag & ALIGN) w.align(4);
+    } else for (const v of items) writeTyped(w, sub, v, depth + 1);
+  } else {
+    for (const c of node.children) writeTyped(w, c, value ? value[c.name] : undefined, depth + 1);
+  }
+  if (align) w.align(4);
 }

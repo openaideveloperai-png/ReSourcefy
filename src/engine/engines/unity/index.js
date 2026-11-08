@@ -5,8 +5,7 @@ import { textureToPNG, spriteToPNG, audioClip, textAssetBytes, guessTextExt, mes
 import { parseMetadata, Il2CppModel, wasmBinary, peBinary, dumpType, isTopLevel, rewriteStringLiterals } from './il2cpp.js';
 import { parseWasm, buildMemory, functionTable, funcName, disassembleFunction } from '../../formats/wasm.js';
 import { isPE, parsePE } from '../../formats/pe.js';
-import { readUnityWebData } from '../../containers/unityweb.js';
-import { Writer } from '../../util/binary.js';
+import { unityEdits, rebuildContainers, toBlob } from './write.js';
 import { PagedBlob } from '../../util/paged.js';
 
 const RESOURCE_EXT = /\.(ress|resource)$/i;
@@ -378,7 +377,7 @@ export default {
     }
     if (web) {
       project.runnable = { kind: 'unity', label: 'Unity WebGL', webgl: true };
-      project.actions.push({ id: 'unity.repackInfo', label: 'How edits are applied', description: 'Edited text assets and IL2CPP string literals are written back into the build when you press Play or export.' });
+      project.actions.push({ id: 'unity.repackInfo', label: 'How edits are applied', description: 'Replaced textures and sprites, edited text assets and IL2CPP string literals are written back into the game files when you press Play or export.' });
     }
     const mainScene = project.scenes[0];
     if (!project.mainFile) project.mainFile = ctx.vfs.find((e) => e.path.startsWith('Project/Scripts/') && e.path.endsWith('.cs'))?.path || (mainScene && mainScene.path) || null;
@@ -392,27 +391,26 @@ export default {
     // web root = parent of the Build folder
     const root = webRootOf(web);
     const index = ctx.vfs.find((e) => e.path === root + 'index.html' && e.origin === 'build');
+    const notes = [];
+    const overrides = await this.rebuiltFiles(ctx, notes);
     const files = {};
     const inner = new Set(['compressed', 'unityweb', 'unitybundle']);
     for (const e of ctx.vfs.list(root.replace(/\/$/, '') || 'Build')) {
       if (e.origin === 'recovered' || e.ref) continue;
       const src = e.source ? ctx.vfs.get(e.source) : null;
       if (src && inner.has(src.container)) continue; // contents of build containers are served via their container
-      files[e.path.slice(root.length)] = await ctx.vfs.blob(e);
+      const o = overrides.get(e.path);
+      files[e.path.slice(root.length)] = o ? toBlob(o) : await ctx.vfs.blob(e);
     }
-    // serve decompressed + repacked versions under their original names
-    const notes = [];
+    // serve decompressed (and rebuilt) versions under their original names
     for (const key of ['data', 'framework', 'code', 'symbols']) {
       const e = web[key];
       if (!e) continue;
       const rel = e.path.slice(root.length);
       const inner = unwrapped(ctx, e);
-      let blob = await ctx.vfs.blob(inner);
-      if (key === 'data') {
-        const repacked = await repackWebData(ctx, inner);
-        if (repacked) { blob = repacked; notes.push('Your edits were packed into the game data.'); }
-      }
-      files[rel] = blob;
+      const o = overrides.get(inner.path) || overrides.get(e.path);
+      if (o && key === 'data') notes.push('Your edits were packed into the game data.');
+      files[rel] = o ? toBlob(o) : await ctx.vfs.blob(inner);
     }
     let entry = index ? 'index.html' : null;
     if (!entry) {
@@ -434,32 +432,40 @@ createUnityInstance(document.querySelector('#unity-canvas'), {
     return { kind: 'unity', label: 'Unity WebGL', entry, files, notes, root };
   },
 
+  // Build files rebuilt with the user's edits: Map(path -> Blob | bytes).
+  async rebuiltFiles(ctx, notes) {
+    const st = ctx.state.unity;
+    if (!st || !st.env) return new Map();
+    try {
+      const overrides = await unityEdits(ctx, st.env, notes);
+      await rebuildContainers(ctx, overrides, notes);
+      return overrides;
+    } catch (err) {
+      notes.push('Your edits could not be packed into the game: ' + err.message);
+      return new Map();
+    }
+  },
+
+  // Export the rebuilt game files along with the edited ones.
+  async beforeExport(ctx, { scope }) {
+    if (scope !== 'modified' || !ctx.state.unity) return null;
+    const notes = [];
+    const overrides = await this.rebuiltFiles(ctx, notes);
+    for (const n of notes) ctx.warn(n);
+    const out = [];
+    for (const [path, v] of overrides) {
+      const e = ctx.vfs.get(path);
+      if (!e || e.origin !== 'build') continue;
+      const data = toBlob(v);
+      out.push({ path, exportPath: path.replace(/^Build\//, ''), data, size: data.size });
+    }
+    return out.length ? out : null;
+  },
+
   actions: {
-    async 'unity.repackInfo'() { return { message: 'Save an edited file, then press Play: ReSourcefy rebuilds the game data with your changes.' }; },
+    async 'unity.repackInfo'() { return { message: 'Replace a texture or sprite, or edit a text asset, then press Play: ReSourcefy rebuilds the game data with your changes. Replaced images are scaled to the size the game expects.' }; },
   },
 };
-
-// Rebuild UnityWebData if any of its files were edited.
-async function repackWebData(ctx, dataEntry) {
-  const kids = ctx.vfs.list(dataEntry.path).filter((k) => k.path.split('/').length === dataEntry.path.split('/').length + 1 || k.modified);
-  if (!kids.some((k) => k.modified)) return null;
-  const files = await readUnityWebData(await ctx.vfs.blob(dataEntry));
-  const parts = [];
-  for (const f of files) {
-    const child = ctx.vfs.get(dataEntry.path + '/' + f.name);
-    parts.push({ name: f.name, data: child ? await ctx.vfs.bytes(child) : new Uint8Array(0) });
-  }
-  const enc = new TextEncoder();
-  let headerSize = 16 + 4;
-  for (const p of parts) headerSize += 12 + enc.encode(p.name).length;
-  const w = new Writer(headerSize + parts.reduce((a, p) => a + p.data.length, 0));
-  w.str('UnityWebData1.0\0');
-  w.u32(headerSize);
-  let off = headerSize;
-  for (const p of parts) { const nb = enc.encode(p.name); w.u32(off); w.u32(p.data.length); w.u32(nb.length); w.bytes(nb); off += p.data.length; }
-  for (const p of parts) w.bytes(p.data);
-  return new Blob([w.result()]);
-}
 
 async function sceneOutline(env, sf, sceneName, scenePath, scriptNames) {
   const gos = new Map(), transforms = new Map(), comps = new Map();

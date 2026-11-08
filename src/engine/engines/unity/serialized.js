@@ -76,6 +76,7 @@ export class SerializedFile {
       if (bigId) pathId = id64(r);
       else if (version < 14) pathId = r.i32();
       else { r.align(4); pathId = id64(r); }
+      const tablePos = r.pos; // where this object's offset and size are stored (for rewriting)
       const byteStart = (version >= 22 ? r.u64() : r.u32()) + dataOffset;
       const byteSize = r.u32();
       const typeId = r.i32();
@@ -93,7 +94,7 @@ export class SerializedFile {
         if (type && type.scriptTypeIndex == null) type.scriptTypeIndex = sti;
       }
       if (version === 15 || version === 16) r.u8_();
-      const obj = { pathId, byteStart, byteSize, classId, type, file: this };
+      const obj = { pathId, byteStart, byteSize, classId, type, file: this, tablePos };
       this.objects.push(obj);
       this.byPathId.set(String(pathId), obj);
     }
@@ -167,11 +168,12 @@ export class SerializedFile {
   release() { if (this.paged) this.paged.release(); }
 
   // Fully parse an object with its type tree. Returns null if no layout is known.
-  read(obj, { partial = false } = {}) {
+  // raw: strings as bytes, for writing the object back unchanged.
+  read(obj, { partial = false, raw = false } = {}) {
     const tree = this.treeFor(obj);
     if (!tree) return null;
     const r = this.reader(obj);
-    if (!partial) return readTyped(r, tree);
+    if (!partial) return readTyped(r, tree, 0, raw);
     // Read only leading fields until something fails (e.g. MonoBehaviour script data).
     const out = {};
     for (const c of tree.children) {
