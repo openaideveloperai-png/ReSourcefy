@@ -90,7 +90,7 @@ class App {
     this.tabbar = h('div', { class: 'tabbar', role: 'tablist' });
     this.viewsEl = h('div', { class: 'views' });
     const center = h('main', { class: 'center' }, this.tabbar, this.viewsEl);
-    this.tabs = new Tabs({ bar: this.tabbar, host: this.viewsEl, onActivate: (t) => { if (t.path) this.tree.select(t.path); } , onClose: (t) => this.confirmClose(t) });
+    this.tabs = new Tabs({ bar: this.tabbar, host: this.viewsEl, onActivate: (t) => { if (t.path) this.tree.select(t.path); if (t.id === 'overview' && this.overview && this.project) this.overview.render(); } , onClose: (t) => this.confirmClose(t) });
 
     // Right: inspector
     this.inspectorEl = h('div', { class: 'inspector' }, h('div', { class: 'insp-empty' }, 'Select a file to see its details.'));
@@ -476,6 +476,7 @@ class App {
 
   async refreshListing(listing) {
     if (listing) { this.listing = listing; this.tree.setItems(listing); }
+    if (this.overview && this.tabs.active && this.tabs.active.id === 'overview') this.overview.render();
   }
 
   // ---------------- files ----------------
@@ -607,12 +608,30 @@ class App {
   }
 
   async revert(tab) {
-    const r = await this.engine.call('revert', { path: tab.path });
+    await this.revertPath(tab.path);
+  }
+
+  // Put a file back to its original content (and reopen it if it's open).
+  async revertPath(path, { quiet = false } = {}) {
+    const r = await this.engine.call('revert', { path });
     if (r.listing) this.refreshListing(r.listing);
-    if (this.gameId) store.deleteEdit(this.gameId, tab.path).catch(() => {});
-    this.tabs.close(tab.id);
-    this.openFile(tab.path);
-    this.toast('Reverted to the original');
+    if (this.gameId) store.deleteEdit(this.gameId, path).catch(() => {});
+    const t = this.tabs.tabs.find((x) => x.path === path);
+    if (t) { this.tabs.close(t.id); this.openFile(path, { background: true }); }
+    if (!quiet) this.toast('Reverted to the original');
+  }
+
+  revertAll() {
+    const edited = (this.listing || []).filter((x) => x.modified);
+    if (!edited.length) return;
+    modal({
+      title: 'Revert all changes?',
+      body: h('p', null, `${edited.length} edited file${edited.length === 1 ? ' goes' : 's go'} back to the original.`),
+      actions: [
+        { label: 'Cancel', value: null },
+        { label: 'Revert all', primary: true, run: () => { (async () => { for (const x of edited) await this.revertPath(x.path, { quiet: true }); this.toast(`Reverted ${edited.length} file${edited.length === 1 ? '' : 's'}`); })(); } },
+      ],
+    });
   }
 
   async saveAllTabs() {

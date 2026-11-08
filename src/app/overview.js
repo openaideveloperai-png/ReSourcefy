@@ -88,6 +88,31 @@ function build(app) {
       stat(((stats.analysisMs || 0) / 1000).toFixed(1) + ' s', 'analysis time'),
     )));
 
+  // shortcuts to the editing tools, and what has been changed so far
+  const listing = app.listing || [];
+  const pics = listing.filter((x) => x.view === 'image' && x.path.startsWith('Project/')).length;
+  const scripts = listing.filter((x) => /^Project\/Assets\/MonoBehaviour\/.+\.json$/.test(x.path)).length;
+  const missing = (p.missing || []).length;
+  const tool = (icon, label, sub, run) => h('button', { class: 'ov-tool', onclick: run }, h('span', { class: 'ov-tool-icon', html: icon }), h('span', null, h('b', null, label), h('span', { class: 'muted small' }, sub)));
+  const edited = listing.filter((x) => x.modified);
+  wrap.appendChild(h('div', { class: 'ov-tools' },
+    tool(icons.format, 'Game text', scripts ? `strings in ${scripts.toLocaleString()} script objects` : 'labels, dialogue and settings', () => app.openTexts()),
+    tool(icons.image, 'Images', pics ? `${pics.toLocaleString()} pictures; drop one to replace` : 'every picture in the game', () => app.openGallery()),
+    tool(icons.search, 'Go to file', 'Ctrl+P', () => app.quickOpen()),
+    p.runnable ? tool(icons.download, 'Download playable', 'the game with your edits, ready to host', () => app.exportGame()) : null,
+    missing ? tool(icons.info, `${missing} missing file${missing === 1 ? '' : 's'}`, 'loaded at run time; how to get them', () => { app.play(); setTimeout(() => app.game && app.game.showMissing(), 300); }) : null,
+  ));
+  if (edited.length) {
+    const rows = edited.slice(0, 40).map((x) => h('div', { class: 'ov-change' },
+      h('button', { class: 'linkish mono', title: x.path, onclick: () => app.openFile(x.path) }, x.path.replace(/^(Project|Build)\//, '')),
+      h('button', { class: 'btn sm ghost', onclick: () => app.revertPath(x.path) }, h('span', { html: icons.revert }), 'Revert')));
+    wrap.appendChild(h('div', { class: 'card ov-changes' },
+      h('div', { class: 'ov-changes-head' }, h('h3', null, `Your changes (${edited.length})`),
+        h('span', { class: 'muted small' }, app.gameId ? 'Saved in this browser · used by Play and Download' : 'Used by Play and Download'),
+        h('button', { class: 'btn sm', onclick: () => app.revertAll() }, 'Revert all')),
+      rows, edited.length > 40 ? h('div', { class: 'muted small' }, `…and ${edited.length - 40} more`) : null));
+  }
+
   const grid = h('div', { class: 'ov-grid' });
   for (const e of engines.length ? engines : p.engines) {
     grid.appendChild(h('div', { class: 'card' },
