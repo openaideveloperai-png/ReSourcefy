@@ -139,3 +139,50 @@ export const asar = {
     e.meta = { ...(e.meta || {}), archive: 'Electron asar', entries: files.length };
   },
 };
+
+// ---------------- tar (ustar, GNU long names, pax paths) ----------------
+function octal(u8, off, len) {
+  let s = '';
+  for (let i = off; i < off + len && u8[i]; i++) s += String.fromCharCode(u8[i]);
+  s = s.trim();
+  return s ? parseInt(s, 8) : 0;
+}
+const cstrAt = (u8, off, len) => { let e = off; while (e < off + len && u8[e]) e++; return utf8(u8.subarray(off, e)); };
+
+async function readTar(blob) {
+  const files = [];
+  let pos = 0, longName = null, paxPath = null;
+  while (pos + 512 <= blob.size) {
+    const h = new Uint8Array(await blob.slice(pos, pos + 512).arrayBuffer());
+    if (h.every((b) => b === 0)) break;
+    const size = octal(h, 124, 12), type = String.fromCharCode(h[156] || 48);
+    const data = pos + 512;
+    let name = cstrAt(h, 0, 100);
+    if (latin1(h.subarray(257, 262)) === 'ustar') { const prefix = cstrAt(h, 345, 155); if (prefix) name = prefix + '/' + name; }
+    if (type === 'L') longName = cstrAt(new Uint8Array(await blob.slice(data, data + size).arrayBuffer()), 0, size);
+    else if (type === 'x') {
+      const text = utf8(new Uint8Array(await blob.slice(data, data + size).arrayBuffer()));
+      const m = /\d+ path=([^\n]*)\n/.exec(text);
+      if (m) paxPath = m[1];
+    } else {
+      if (type === '0' || type === '\0' || type === '7') files.push({ name: paxPath || longName || name, offset: data, size });
+      longName = null; paxPath = null;
+    }
+    pos = data + Math.ceil(size / 512) * 512;
+  }
+  return files;
+}
+
+export const tar = {
+  id: 'tar',
+  kinds: ['tar'],
+  async expand(ctx, e) {
+    const blob = await ctx.vfs.blob(e);
+    const files = await readTar(blob);
+    for (const f of files) {
+      const name = f.name.replace(/^\.\//, '').replace(/^\/+/, '');
+      if (name) ctx.extract(`${e.path}/${name}`, blob.slice(f.offset, f.offset + f.size), { source: e.path });
+    }
+    e.meta = { ...(e.meta || {}), archive: 'tar', entries: files.length };
+  },
+};

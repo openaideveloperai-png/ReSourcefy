@@ -166,6 +166,7 @@ export function sniffBytes(head, name = '') {
     if (startsWith(head, [0x04, 0x22, 0x4d, 0x18])) return T('lz4', 'hex', null, 'LZ4 frame');
     if (startsWith(head, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])) return T('7z', 'hex', null, '7-Zip archive');
     if (startsWith(head, 'Rar!')) return T('rar', 'hex', null, 'RAR archive');
+    if (head.length >= 262 && startsWith(head, 'ustar', 257)) return T('tar', 'hex', null, 'TAR archive');
     if (startsWith(head, 'UnityWebData1.0')) return T('unityweb', 'hex', null, 'Unity WebGL data');
     if (startsWith(head, 'UnityFS') || startsWith(head, 'UnityWeb') || startsWith(head, 'UnityRaw') || startsWith(head, 'UnityArchive')) return T('unitybundle', 'hex', null, 'Unity bundle');
     if (startsWith(head, 'GDPC')) return T('pck', 'hex', null, 'Godot package');

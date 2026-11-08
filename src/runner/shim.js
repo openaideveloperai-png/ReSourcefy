@@ -47,9 +47,30 @@ import * as FakeIDB from 'fake-indexeddb';
     };
   }
   // document.open() erases window listeners, so the written page re-installs these first.
+  // Screenshot: copy the biggest canvas right after the game draws a frame (WebGL canvases
+  // are only readable before the frame is shown). Canvases in open shadow roots count too.
+  const allCanvases = (root, out = []) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.tagName === 'CANVAS') out.push(el);
+      if (el.shadowRoot) allCanvases(el.shadowRoot, out);
+    }
+    return out;
+  };
+  const takeScreenshot = () => requestAnimationFrame(() => {
+    try {
+      const c = allCanvases(document).filter((x) => x.width && x.height).sort((a, b) => b.width * b.height - a.width * a.height)[0];
+      if (!c) { post({ type: 'screenshot', error: 'This game draws no canvas, so there is nothing to capture.' }); return; }
+      const off = document.createElement('canvas');
+      off.width = c.width;
+      off.height = c.height;
+      off.getContext('2d').drawImage(c, 0, 0);
+      off.toBlob((b) => post(b ? { type: 'screenshot', blob: b, width: c.width, height: c.height } : { type: 'screenshot', error: 'The picture could not be read.' }), 'image/png');
+    } catch (e) { post({ type: 'screenshot', error: String((e && e.message) || e) }); }
+  });
   window.__rsfReinstall = () => {
     window.addEventListener('error', (e) => queueLog('error', `${e.message || 'Error'}${e.filename ? ` (${e.filename.replace(/^blob:[^ ]*/, 'script')}:${e.lineno})` : ''}`));
     window.addEventListener('unhandledrejection', (e) => queueLog('error', 'Unhandled promise rejection: ' + fmt(e.reason)));
+    window.addEventListener('message', (ev) => { const m = ev.data; if (m && m.__rsf && m.type === 'screenshot') takeScreenshot(); });
   };
   window.__rsfReinstall();
 

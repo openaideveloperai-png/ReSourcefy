@@ -2,6 +2,7 @@
 /* global __RUNNER_SHIM__ */
 import { h, icons, clear } from './dom.js';
 import { showMissingDialog } from './missing.js';
+import { saveFile } from './caps.js';
 
 const SHIM = typeof __RUNNER_SHIM__ !== 'undefined' ? __RUNNER_SHIM__ : '';
 let vendorManifest = null;
@@ -51,11 +52,12 @@ export class GameView {
     this.btnRestart = h('button', { class: 'btn sm', onclick: () => this.start(), title: 'Rebuild with your edits and restart' }, h('span', { html: icons.rebuild }), 'Restart');
     this.btnStop = h('button', { class: 'btn sm', onclick: () => this.stop(), disabled: true }, h('span', { html: icons.stop }), 'Stop');
     this.btnFull = h('button', { class: 'btn sm', onclick: () => this.fullscreen(), disabled: true }, h('span', { html: icons.expand }), 'Fullscreen');
+    this.btnShot = h('button', { class: 'btn sm', onclick: () => this.screenshot(), disabled: true, title: 'Save a picture of the game' }, h('span', { html: icons.image }), 'Screenshot');
     this.btnDownload = h('button', { class: 'btn sm', onclick: () => this.app.exportGame(), title: 'Download the game with your edits as a zip you can host or share' }, h('span', { html: icons.download }), 'Download');
     // files the game asked for (or will ask for) that aren't in the upload
     this.missing = new Map();
     this.btnMissing = h('button', { class: 'btn sm warn', hidden: true, onclick: () => this.showMissing(), title: 'Files the game needs that are not in the upload' });
-    this.bar = h('div', { class: 'view-bar' }, h('span', { class: 'path' }, 'Game'), this.status, this.btnMissing, this.btnRestart, this.btnStop, this.btnFull, this.btnDownload);
+    this.bar = h('div', { class: 'view-bar' }, h('span', { class: 'path' }, 'Game'), this.status, this.btnMissing, this.btnRestart, this.btnStop, this.btnFull, this.btnShot, this.btnDownload);
     this.el = [this.bar, this.stage];
     this.onMessage = (e) => this.message(e);
     window.addEventListener('message', this.onMessage);
@@ -135,6 +137,7 @@ export class GameView {
     this.running = true;
     this.btnStop.disabled = false;
     this.btnFull.disabled = false;
+    this.btnShot.disabled = false;
     this.app.log('info', `Running ${run.label || 'game'} (${Object.keys(files).length} files)`);
     if (run.notes) for (const n of run.notes) this.app.log('warn', n);
   }
@@ -161,6 +164,11 @@ export class GameView {
         this.app.log('warn', `The game asked for ${fresh.length === 1 ? 'a file that isn’t' : fresh.length + ' files that aren’t'} in the upload: ${fresh.slice(0, 8).join(', ')}${fresh.length > 8 ? ', …' : ''}`, 'game');
         this.updateMissing();
       }
+    } else if (m.type === 'screenshot') {
+      if (m.error || !m.blob) { this.app.toast(m.error || 'No picture came back from the game.', { error: true }); return; }
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+      const name = ((this.app.project && this.app.project.name) || 'game').replace(/[\\/:*?"<>|]+/g, '_');
+      saveFile(`${name}-${stamp}.png`, m.blob).then((res) => this.app.toast(res.ok ? `${res.message} (${m.width}×${m.height})` : res.message, { error: !res.ok }));
     } else if (m.type === 'storage') {
       storeSaves(this.app.project ? this.app.project.name : 'game', m.data);
     } else if (m.type === 'failed') {
@@ -180,8 +188,13 @@ export class GameView {
     this.running = false;
     this.btnStop.disabled = true;
     this.btnFull.disabled = true;
+    this.btnShot.disabled = true;
     this.app.setRunning(false);
     if (!silent) { this.status.textContent = 'Stopped'; this.idle('Stopped', 'Press Play to run the game again. Edits you saved are included.'); }
+  }
+
+  screenshot() {
+    if (this.iframe && this.iframe.contentWindow) this.iframe.contentWindow.postMessage({ __rsf: true, type: 'screenshot' }, '*');
   }
 
   fullscreen() {

@@ -3,7 +3,7 @@ import compressed from './compressed.js';
 import zip from './zip.js';
 import unityweb from './unityweb.js';
 import unitybundle from '../engines/unity/bundle.js';
-import { rpa, asar } from './archives.js';
+import { rpa, asar, tar } from './archives.js';
 
 export const containers = [
   compressed,
@@ -12,6 +12,7 @@ export const containers = [
   unitybundle,
   rpa,
   asar,
+  tar,
 ];
 
 export function registerContainer(handler) {

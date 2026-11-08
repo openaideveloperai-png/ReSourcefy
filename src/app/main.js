@@ -77,7 +77,7 @@ class App {
       onOpen: (path) => { this.openFile(path); if (this.isNarrow()) this.showPane('editor'); },
       onSelect: (path) => this.inspect(path),
     });
-    const filter = h('input', { class: 'search-input', type: 'search', placeholder: 'Filter files', 'aria-label': 'Filter files', id: 'tree-filter' });
+    const filter = h('input', { class: 'search-input', type: 'search', placeholder: 'Filter files  (Ctrl+P: go to file)', 'aria-label': 'Filter files', id: 'tree-filter' });
     filter.addEventListener('input', debounce(() => this.tree.setFilter(filter.value), 150));
     this.leftTabs = { files: null };
     const left = h('aside', { class: 'side left', 'aria-label': 'Project' },
@@ -193,6 +193,7 @@ class App {
     });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) { e.preventDefault(); this.togglePlay(); }
+      else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); this.quickOpen(); }
       else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) { e.preventDefault(); this.showDock('search'); }
       else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); const t = this.tabs.active; if (t && t.save) t.save(); }
     });
@@ -767,6 +768,52 @@ class App {
       this.toast(e.message, { error: true });
       this.log('error', e.message);
     } finally { this.progress(null); }
+  }
+
+  // Ctrl+P: jump to a file by typing part of its name.
+  quickOpen() {
+    if (!this.listing || document.querySelector('.qo')) return;
+    const input = h('input', { type: 'text', placeholder: 'Type part of a file name…', 'aria-label': 'File name', spellcheck: 'false' });
+    const list = h('div', { class: 'qo-list', role: 'listbox' });
+    let results = [], sel = 0;
+    const score = (path, q) => {
+      const p = path.toLowerCase(), name = p.slice(p.lastIndexOf('/') + 1);
+      let s;
+      const i = name.indexOf(q);
+      if (i >= 0) s = 1000 - i * 4 - name.length * 0.2;
+      else if (p.includes(q)) s = 500 - p.length * 0.05;
+      else {
+        // letters in order, fewer gaps first
+        let k = 0, gaps = 0, last = -1;
+        for (let j = 0; j < p.length && k < q.length; j++) if (p[j] === q[k]) { if (last >= 0) gaps += j - last - 1; last = j; k++; }
+        if (k < q.length) return -1;
+        s = 200 - gaps * 0.5;
+      }
+      return s + (path.startsWith('Project/') ? 50 : 0);
+    };
+    const pick = (i) => { const r = results[i]; if (!r) return; dlg.close(null); this.openFile(r.path); if (this.isNarrow()) this.showPane('editor'); };
+    const render = () => {
+      const q = input.value.trim().toLowerCase();
+      results = q ? this.listing.map((x) => ({ path: x.path, s: score(x.path, q) })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).slice(0, 60) : this.listing.filter((x) => x.modified).map((x) => ({ path: x.path })).slice(0, 60);
+      sel = Math.min(sel, Math.max(0, results.length - 1));
+      clear(list);
+      if (!results.length) list.append(h('div', { class: 'muted small qo-empty' }, q ? 'No file matches.' : 'Type to search every file. Edited files are listed here.'));
+      results.forEach((r, i) => {
+        const slash = r.path.lastIndexOf('/');
+        list.append(h('div', { class: 'qo-item' + (i === sel ? ' sel' : ''), role: 'option', 'aria-selected': String(i === sel), onmousedown: (e) => { e.preventDefault(); pick(i); } },
+          h('span', { class: 'qo-name' }, r.path.slice(slash + 1)), h('span', { class: 'muted small qo-dir' }, r.path.slice(0, slash))));
+      });
+      list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+    };
+    input.addEventListener('input', () => { sel = 0; render(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(results.length - 1, sel + 1); render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); render(); }
+      else if (e.key === 'Enter') { e.preventDefault(); pick(sel); }
+    });
+    const dlg = modal({ title: 'Go to file', body: h('div', { class: 'qo' }, input, list), actions: [] });
+    dlg.el.classList.add('wide');
+    render();
   }
 
   openGallery() {
