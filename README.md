@@ -19,6 +19,17 @@ Everything runs in the browser; files are never uploaded.
 | LÖVE | `.love`, fused `.exe`, folder | Lua sources and assets | love.js (LÖVE 11) | Lua and assets |
 | HTML5 | Construct, Phaser, GDevelop, PlayCanvas, Cocos, Defold, … | JavaScript and assets | Yes | Anything |
 
+## Editing tools
+
+- **Game text**: every string in a game's script data (UI labels, dialogue, settings) in one
+  editable table; optionally the strings in the game code too.
+- **Images**: thumbnails of every picture; drop an image on one to replace it.
+- **Script values**: Unity MonoBehaviours and ScriptableObjects as editable JSON, with layouts
+  rebuilt from IL2CPP metadata when the build has none.
+- **Download playable**: the game with your edits and its runtime, zipped and ready to host.
+- Games and edits are kept in the browser and reopen after a reload; the Overview lists every
+  change with Revert. Ctrl+P jumps to any file; the Game view can take screenshots.
+
 Web builds often load extra files at run time (Unity's StreamingAssets, Addressables bundles).
 ReSourcefy lists the ones that weren't uploaded, writes download commands for them from the
 game's web address (an itch.io frame URL or upload number works), and adds them when dropped in.
