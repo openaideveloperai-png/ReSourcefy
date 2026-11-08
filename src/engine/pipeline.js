@@ -207,6 +207,41 @@ export async function inspectFile(ctx, path) {
   return { path: e.path, rows, meta: e.meta || null, kind: e.kind, view: e.view, actions: e.actions || [] };
 }
 
+// ---------- thumbnails ----------
+const thumbCache = new Map();
+
+// Small previews of images: { path: { blob, width, height } | { error } }. Only the preview is kept.
+export async function thumbnails(ctx, { paths, size = 160 }) {
+  const out = {};
+  for (const p of paths) {
+    const e = ctx.vfs.get(p);
+    if (!e) continue;
+    const key = `${p}|${e.modified ? 'm' + e.size + ':' + ctx.vfs.version : 'o'}|${size}`;
+    if (thumbCache.has(key)) { out[p] = thumbCache.get(key); continue; }
+    try {
+      let blob;
+      const conv = converters[e.kind];
+      if (conv) { const r = await conv(ctx, e); blob = r && r.blob; }
+      if (!blob) blob = await ctx.vfs.peekBlob(e);
+      const bmp = await createImageBitmap(blob);
+      const scale = Math.min(1, size / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+      const c = new OffscreenCanvas(w, h);
+      const g = c.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(bmp, 0, 0, w, h);
+      const t = { blob: await c.convertToBlob({ type: 'image/webp', quality: 0.85 }), width: bmp.width, height: bmp.height };
+      bmp.close?.();
+      if (thumbCache.size > 4000) thumbCache.delete(thumbCache.keys().next().value);
+      thumbCache.set(key, t);
+      out[p] = t;
+    } catch (err) {
+      out[p] = { error: err && err.message ? err.message : 'not a picture' };
+    }
+  }
+  return out;
+}
+
 // ---------- write ----------
 
 export async function writeFile(ctx, path, data) {

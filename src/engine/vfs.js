@@ -169,6 +169,19 @@ export class VFS {
     return e.data.subarray(start, end);
   }
 
+  // The content as a Blob without keeping a generated result (for previews of many files).
+  async peekBlob(pathOrEntry) {
+    let e = typeof pathOrEntry === 'string' ? this.get(pathOrEntry) : pathOrEntry;
+    if (!e) throw new Error(`file not found: ${pathOrEntry}`);
+    if (e.ref) e = this.deref(e);
+    if (!e) throw new Error('linked file is missing');
+    if (e.data == null && e.producer) {
+      const d = await e.producer(e);
+      return d instanceof Blob ? d : new Blob([typeof d === 'string' ? encodeUtf8(d) : d || new Uint8Array(0)]);
+    }
+    return this.blob(e);
+  }
+
   async blob(pathOrEntry) {
     let e = typeof pathOrEntry === 'string' ? this.get(pathOrEntry) : pathOrEntry;
     if (!e) throw new Error(`file not found: ${pathOrEntry}`);
@@ -236,6 +249,7 @@ export class VFS {
         origin: e.origin,
         modified: e.modified || (e.ref ? !!(this.deref(e) || {}).modified : false),
         lazy: e.data == null && !!e.producer,
+        readonly: !!e.readonlyReason,
       };
     }
     return out;
