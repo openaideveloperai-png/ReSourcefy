@@ -3,132 +3,284 @@
 // binary: WebAssembly (WebGL) memory or a PE (GameAssembly.dll).
 import { Reader, latin1 } from '../../util/binary.js';
 
-const U = 'u32', I = 'i32', H = 'u16';
-// [name, type, minVersion, maxVersion]
-const HEADER = [
-  ['sanity', U], ['version', I], ['stringLiteralOffset', U], ['stringLiteralSize', I], ['stringLiteralDataOffset', U], ['stringLiteralDataSize', I],
-  ['stringOffset', U], ['stringSize', I], ['eventsOffset', U], ['eventsSize', I], ['propertiesOffset', U], ['propertiesSize', I], ['methodsOffset', U], ['methodsSize', I],
-  ['parameterDefaultValuesOffset', U], ['parameterDefaultValuesSize', I], ['fieldDefaultValuesOffset', U], ['fieldDefaultValuesSize', I],
-  ['fieldAndParameterDefaultValueDataOffset', U], ['fieldAndParameterDefaultValueDataSize', I], ['fieldMarshaledSizesOffset', I], ['fieldMarshaledSizesSize', I],
-  ['parametersOffset', U], ['parametersSize', I], ['fieldsOffset', U], ['fieldsSize', I], ['genericParametersOffset', U], ['genericParametersSize', I],
-  ['genericParameterConstraintsOffset', U], ['genericParameterConstraintsSize', I], ['genericContainersOffset', U], ['genericContainersSize', I],
-  ['nestedTypesOffset', U], ['nestedTypesSize', I], ['interfacesOffset', U], ['interfacesSize', I], ['vtableMethodsOffset', U], ['vtableMethodsSize', I],
-  ['interfaceOffsetsOffset', I], ['interfaceOffsetsSize', I], ['typeDefinitionsOffset', U], ['typeDefinitionsSize', I],
-  ['rgctxEntriesOffset', U, 0, 24.1], ['rgctxEntriesCount', I, 0, 24.1],
-  ['imagesOffset', U], ['imagesSize', I], ['assembliesOffset', U], ['assembliesSize', I],
-  ['metadataUsageListsOffset', U, 19, 24.5], ['metadataUsageListsCount', I, 19, 24.5], ['metadataUsagePairsOffset', U, 19, 24.5], ['metadataUsagePairsCount', I, 19, 24.5],
-  ['fieldRefsOffset', U, 19], ['fieldRefsSize', I, 19], ['referencedAssembliesOffset', I, 20], ['referencedAssembliesSize', I, 20],
-  ['attributesInfoOffset', U, 21, 27.2], ['attributesInfoCount', I, 21, 27.2], ['attributeTypesOffset', U, 21, 27.2], ['attributeTypesCount', I, 21, 27.2],
-  ['attributeDataOffset', U, 29], ['attributeDataSize', I, 29], ['attributeDataRangeOffset', U, 29], ['attributeDataRangeSize', I, 29],
-  ['unresolvedVirtualCallParameterTypesOffset', I, 22], ['unresolvedVirtualCallParameterTypesSize', I, 22],
-  ['unresolvedVirtualCallParameterRangesOffset', I, 22], ['unresolvedVirtualCallParameterRangesSize', I, 22],
-  ['windowsRuntimeTypeNamesOffset', I, 23], ['windowsRuntimeTypeNamesSize', I, 23], ['windowsRuntimeStringsOffset', I, 27], ['windowsRuntimeStringsSize', I, 27],
-  ['exportedTypeDefinitionsOffset', I, 24], ['exportedTypeDefinitionsSize', I, 24],
+// Section order of Il2CppGlobalMetadataHeader: [name, minVersion, maxVersion]. From v38 every
+// section is {offset, size, count}; before that {offset, size}.
+const SECTIONS = [
+  ['stringLiteral'], ['stringLiteralData'], ['string'], ['events'], ['properties'], ['methods'], ['parameterDefaultValues'], ['fieldDefaultValues'],
+  ['fieldAndParameterDefaultValueData'], ['fieldMarshaledSizes'], ['parameters'], ['fields'], ['genericParameters'], ['genericParameterConstraints'],
+  ['genericContainers'], ['nestedTypes'], ['interfaces'], ['vtableMethods'], ['interfaceOffsets'], ['typeDefinitions'],
+  ['typeInlineArrays', 104], ['rgctxEntries', 0, 24.1], ['images'], ['assemblies'],
+  ['metadataUsageLists', 19, 24.5], ['metadataUsagePairs', 19, 24.5], ['fieldRefs', 19], ['referencedAssemblies', 20],
+  ['attributesInfo', 21, 27.2], ['attributeTypes', 21, 27.2], ['attributeData', 29], ['attributeDataRange', 29],
+  ['unresolvedVirtualCallParameterTypes', 22], ['unresolvedVirtualCallParameterRanges', 22], ['windowsRuntimeTypeNames', 23],
+  ['windowsRuntimeStrings', 27], ['exportedTypeDefinitions', 24],
+  ['methodSpecsOnGenericType', 108], ['genericMethodSpecsOnType', 108], ['methodSpecs', 108], ['genericMethodFunctionsDefinitions', 108],
+  ['genericMethodFunctionsDefinitionsWithAdjustor', 108], ['invokerIndices', 108], ['rgctxRanges', 108], ['rgctxValues', 108], ['staticConstructorTypeIndices', 108],
 ];
-const IMAGE = [['nameIndex', U], ['assemblyIndex', I], ['typeStart', I], ['typeCount', U], ['exportedTypeStart', I, 24], ['exportedTypeCount', U, 24], ['entryPointIndex', I], ['token', U, 19], ['customAttributeStart', I, 24.1], ['customAttributeCount', U, 24.1]];
-const TYPEDEF = [
-  ['nameIndex', U], ['namespaceIndex', U], ['customAttributeIndex', I, 0, 24], ['byvalTypeIndex', I], ['byrefTypeIndex', I, 0, 24.5], ['declaringTypeIndex', I], ['parentIndex', I], ['elementTypeIndex', I],
-  ['rgctxStartIndex', I, 0, 24.1], ['rgctxCount', I, 0, 24.1], ['genericContainerIndex', I], ['delegateWrapperFromManagedToNativeIndex', I, 0, 22], ['marshalingFunctionsIndex', I, 0, 22],
-  ['ccwFunctionIndex', I, 21, 22], ['guidIndex', I, 21, 22], ['flags', U], ['fieldStart', I], ['methodStart', I], ['eventStart', I], ['propertyStart', I], ['nestedTypesStart', I], ['interfacesStart', I],
-  ['vtableStart', I], ['interfaceOffsetsStart', I], ['method_count', H], ['property_count', H], ['field_count', H], ['event_count', H], ['nested_type_count', H], ['vtable_count', H],
-  ['interfaces_count', H], ['interface_offsets_count', H], ['bitfield', U], ['token', U, 19],
-];
-const METHOD = [['nameIndex', U], ['declaringType', I], ['returnType', I], ['returnParameterToken', I, 31], ['parameterStart', I], ['customAttributeIndex', I, 0, 24], ['genericContainerIndex', I],
-  ['methodIndex', I, 0, 24.1], ['invokerIndex', I, 0, 24.1], ['delegateWrapperIndex', I, 0, 24.1], ['rgctxStartIndex', I, 0, 24.1], ['rgctxCount', I, 0, 24.1], ['token', U], ['flags', H], ['iflags', H], ['slot', H], ['parameterCount', H]];
-const PARAM = [['nameIndex', U], ['token', U], ['customAttributeIndex', I, 0, 24], ['typeIndex', I]];
-const FIELD = [['nameIndex', U], ['typeIndex', I], ['customAttributeIndex', I, 0, 24], ['token', U, 19]];
-const PROPERTY = [['nameIndex', U], ['get', I], ['set', I], ['attrs', U], ['customAttributeIndex', I, 0, 24], ['token', U, 19]];
-const EVENT = [['nameIndex', U], ['typeIndex', I], ['add', I], ['remove', I], ['raise', I], ['customAttributeIndex', I, 0, 24], ['token', U, 19]];
-const DEFVAL = [['index', I], ['typeIndex', I], ['dataIndex', I]];
-const STRLIT = [['length', U], ['dataIndex', I]];
-const GCONTAINER = [['ownerIndex', I], ['type_argc', I], ['is_method', I], ['genericParameterStart', I]];
-const GPARAM = [['ownerIndex', I], ['nameIndex', U], ['constraintsStart', 'i16'], ['constraintsCount', 'i16'], ['num', H], ['flags', H]];
 
-const SIZES = { u32: 4, i32: 4, u16: 2, i16: 2 };
-function layout(fields, v) {
+// Record layouts: [name, type, minVersion, maxVersion]. Types are fixed-size ints, or (from v38)
+// an index whose width depends on the size of the table it points into:
+//   td type definition, gc generic container, type Il2CppType, param parameter, io interface offset,
+//   ev event, pr property, nt nested type, m method, gp generic parameter, f field, dv default value data
+const IMAGE = [['nameIndex', 'u32'], ['assemblyIndex', 'i32'], ['typeStart', 'td'], ['typeCount', 'u32'], ['exportedTypeStart', 'td', 24], ['exportedTypeCount', 'u32', 24],
+  ['entryPointIndex', 'm'], ['token', 'u32', 19], ['customAttributeStart', 'i32', 24.1], ['customAttributeCount', 'u32', 24.1],
+  ['invokerIndicesStart', 'i32', 108], ['rgctxRangesStart', 'i32', 108], ['rgctxRangesCount', 'u32', 108], ['staticConstructorStart', 'td', 108], ['staticConstructorCount', 'u32', 108]];
+const TYPEDEF = [
+  ['nameIndex', 'u32'], ['namespaceIndex', 'u32'], ['customAttributeIndex', 'i32', 0, 24], ['byvalTypeIndex', 'type'], ['byrefTypeIndex', 'i32', 0, 24.5],
+  ['declaringTypeIndex', 'type'], ['parentIndex', 'type'], ['elementTypeIndex', 'i32', 0, 34.9], ['rgctxStartIndex', 'i32', 0, 24.1], ['rgctxCount', 'i32', 0, 24.1],
+  ['genericContainerIndex', 'gc'], ['delegateWrapperFromManagedToNativeIndex', 'i32', 0, 22], ['marshalingFunctionsIndex', 'i32', 0, 22],
+  ['ccwFunctionIndex', 'i32', 21, 22], ['guidIndex', 'i32', 21, 22], ['flags', 'u32'], ['fieldStart', 'f'], ['methodStart', 'm'], ['eventStart', 'ev'], ['propertyStart', 'pr'],
+  ['nestedTypesStart', 'nt'], ['interfacesStart', 'io'], ['vtableStart', 'i32'], ['interfaceOffsetsStart', 'io'], ['method_count', 'u16'], ['property_count', 'u16'],
+  ['field_count', 'u16'], ['event_count', 'u16'], ['nested_type_count', 'u16'], ['vtable_count', 'u16'], ['interfaces_count', 'u16'], ['interface_offsets_count', 'u16'],
+  ['bitfield', 'u32'], ['token', 'u32', 19],
+];
+const METHOD = [['nameIndex', 'u32'], ['declaringType', 'td'], ['returnType', 'type'], ['returnParameterToken', 'u32', 31], ['parameterStart', 'param'],
+  ['customAttributeIndex', 'i32', 0, 24], ['genericContainerIndex', 'gc'], ['methodIndex', 'i32', 0, 24.1], ['invokerIndex', 'i32', 0, 24.1], ['delegateWrapperIndex', 'i32', 0, 24.1],
+  ['rgctxStartIndex', 'i32', 0, 24.1], ['rgctxCount', 'i32', 0, 24.1], ['token', 'u32'], ['flags', 'u16'], ['iflags', 'u16'], ['slot', 'u16'], ['parameterCount', 'u16']];
+const PARAM = [['nameIndex', 'u32'], ['token', 'u32'], ['customAttributeIndex', 'i32', 0, 24], ['typeIndex', 'type']];
+const FIELD = [['nameIndex', 'u32'], ['typeIndex', 'type'], ['customAttributeIndex', 'i32', 0, 24], ['token', 'u32', 19]];
+const PROPERTY = [['nameIndex', 'u32'], ['get', 'm'], ['set', 'm'], ['attrs', 'u32'], ['customAttributeIndex', 'i32', 0, 24], ['token', 'u32', 19]];
+const EVENT = [['nameIndex', 'u32'], ['typeIndex', 'type'], ['add', 'm'], ['remove', 'm'], ['raise', 'm'], ['customAttributeIndex', 'i32', 0, 24], ['token', 'u32', 19]];
+const FIELD_DEFVAL = [['index', 'f'], ['typeIndex', 'type'], ['dataIndex', 'dv']];
+const PARAM_DEFVAL = [['index', 'param'], ['typeIndex', 'type'], ['dataIndex', 'dv']];
+const STRLIT = [['length', 'u32', 0, 34.9], ['dataIndex', 'i32']];
+const GCONTAINER = [['ownerIndex', 'i32'], ['type_argc', 'i32', 0, 105.9], ['is_method', 'i32', 0, 105.9], ['type_argc', 'u16', 106], ['is_method', 'u8', 106], ['genericParameterStart', 'gp']];
+const GPARAM = [['ownerIndex', 'gc'], ['nameIndex', 'u32'], ['constraintsStart', 'i16'], ['constraintsCount', 'i16'], ['num', 'u16'], ['flags', 'u16']];
+
+const FIXED = { u32: 4, i32: 4, u16: 2, i16: 2, u8: 1 };
+const widthFor = (n) => (n <= 0xff ? 1 : n <= 0xffff ? 2 : 4);
+
+function compile(spec, v, W) {
   const out = [];
   let size = 0;
-  for (const [name, type, min = 0, max = 999] of fields) {
+  for (const [name, type, min = 0, max = 9999] of spec) {
     if (v < min || v > max) continue;
-    out.push([name, type, size]);
-    size += SIZES[type];
+    const w = FIXED[type] || W[type] || 4;
+    out.push([name, type, w]);
+    size += w;
   }
   return { fields: out, size };
 }
-function readArray(dv, offset, byteSize, fields, v) {
-  const L = layout(fields, v);
-  const n = Math.floor(byteSize / L.size);
+
+// Read `count` records (or as many as `byteSize` holds) of a layout, checking bounds first.
+function readRecords(dv, offset, byteSize, count, spec, v, W, what) {
+  const L = compile(spec, v, W);
+  const n = count != null ? count : Math.floor(byteSize / L.size);
+  if (n < 0 || offset < 0 || offset + n * L.size > dv.byteLength) throw new Error(`the ${what} table lies outside the file`);
   const arr = new Array(n);
+  let o = offset;
   for (let i = 0; i < n; i++) {
-    const o = offset + i * L.size, rec = {};
-    for (const [name, type, fo] of L.fields) {
-      rec[name] = type === 'u32' ? dv.getUint32(o + fo, true) : type === 'i32' ? dv.getInt32(o + fo, true) : type === 'u16' ? dv.getUint16(o + fo, true) : dv.getInt16(o + fo, true);
+    const rec = {};
+    for (const [name, type, w] of L.fields) {
+      let val;
+      switch (type) {
+        case 'u32': val = dv.getUint32(o, true); break;
+        case 'i32': val = dv.getInt32(o, true); break;
+        case 'u16': val = dv.getUint16(o, true); break;
+        case 'i16': val = dv.getInt16(o, true); break;
+        case 'u8': val = dv.getUint8(o); break;
+        default:
+          if (w === 1) { val = dv.getUint8(o); if (val === 0xff) val = -1; }
+          else if (w === 2) { val = dv.getUint16(o, true); if (val === 0xffff) val = -1; }
+          else val = dv.getInt32(o, true);
+      }
+      rec[name] = val;
+      o += w;
     }
     arr[i] = rec;
   }
   return arr;
 }
 
+function readHeader(dv, v) {
+  const h = { sanity: dv.getUint32(0, true), version: dv.getInt32(4, true), positions: {} };
+  const triple = v >= 38;
+  let p = 8;
+  for (const [name, min = 0, max = 9999] of SECTIONS) {
+    if (v < min || v > max) continue;
+    h.positions[name] = p;
+    h[name + 'Offset'] = dv.getUint32(p, true);
+    h[name + 'Size'] = dv.getInt32(p + 4, true);
+    if (triple) { h[name + 'Count'] = dv.getInt32(p + 8, true); p += 12; } else p += 8;
+  }
+  h.size = p;
+  return h;
+}
+
+// Layouts this reader knows. A file's version number picks the first one to try; if that layout
+// doesn't fit the file (tables of the wrong size, indices pointing nowhere), the others are tried.
+const KNOWN_LAYOUTS = [24, 24.1, 24.2, 27, 29, 31, 35, 38, 39, 104, 105, 106, 108];
+
+function firstLayouts(raw, dv) {
+  if (raw === 24) {
+    // 24.2+ dropped the rgctx section, which makes the header 8 bytes shorter
+    return dv.getUint32(8, true) === 264 ? [24.2] : [24.1, 24];
+  }
+  if (raw === 107) return [106]; // v107 reads like v106
+  if (raw > 108) return [108];
+  return KNOWN_LAYOUTS.includes(raw) ? [raw] : [];
+}
+
 export function parseMetadata(u8) {
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-  if (dv.getUint32(0, true) !== 0xfab11baf) throw new Error('not an IL2CPP metadata file');
+  if (u8.length < 64 || dv.getUint32(0, true) !== 0xfab11baf) throw new Error('not an IL2CPP metadata file (it may be encrypted)');
   const rawVersion = dv.getInt32(4, true);
-  if (rawVersion < 16 || rawVersion > 200) throw new Error(`unexpected metadata version ${rawVersion}`);
-  let v = rawVersion > 31 ? 31 : rawVersion;
-  let header = readArray(dv, 0, layout(HEADER, v).size, HEADER, v)[0];
-  if (rawVersion === 24) {
-    if (header.stringLiteralOffset === 264) { v = 24.2; header = readArray(dv, 0, layout(HEADER, v).size, HEADER, v)[0]; }
-    else {
-      const imgs = readArray(dv, header.imagesOffset, header.imagesSize, IMAGE, 24);
-      if (imgs.some((x) => x.token !== 1)) v = 24.1;
+  if (rawVersion < 16 || rawVersion > 400) throw new Error(`unexpected metadata version ${rawVersion}`);
+  const first = firstLayouts(rawVersion, dv);
+  const near = rawVersion > 108 ? 108 : rawVersion;
+  const rest = KNOWN_LAYOUTS.filter((v) => !first.includes(v)).sort((a, b) => Math.abs(a - near) - Math.abs(b - near));
+  let best = null, firstError = null;
+  for (const v of [...first, ...rest]) {
+    for (const typeWidth of v >= 38 ? [0, 4, 2, 1] : [0]) {
+      let md;
+      try { md = readMetadataAs(u8, dv, rawVersion, v, typeWidth); } catch (err) { if (!firstError) firstError = err; continue; }
+      if (!best || md.fit > best.fit) best = md;
+      if (md.fit >= 0.995) break;
     }
+    if (best && best.fit >= 0.995) break;
   }
-  const md = { u8, dv, rawVersion, version: v, header };
-  md.images = readArray(dv, header.imagesOffset, header.imagesSize, IMAGE, v);
-  md.typeDefs = readArray(dv, header.typeDefinitionsOffset, header.typeDefinitionsSize, TYPEDEF, v);
-  md.methodDefs = readArray(dv, header.methodsOffset, header.methodsSize, METHOD, v);
-  // Unknown newer versions: sanity-check the method layout, retry without the v31 field.
-  if (rawVersion > 31 && !layoutLooksRight(md)) {
-    md.methodDefs = readArray(dv, header.methodsOffset, header.methodsSize, METHOD, 29);
+  if (!best || best.fit < 0.9) {
+    throw firstError && !best ? firstError : new Error(`metadata v${rawVersion} could not be read: no known layout fits it (it may be protected or a newer format)`);
   }
-  md.paramDefs = readArray(dv, header.parametersOffset, header.parametersSize, PARAM, v);
-  md.fieldDefs = readArray(dv, header.fieldsOffset, header.fieldsSize, FIELD, v);
-  md.propertyDefs = readArray(dv, header.propertiesOffset, header.propertiesSize, PROPERTY, v);
-  md.eventDefs = readArray(dv, header.eventsOffset, header.eventsSize, EVENT, v);
-  md.fieldDefaults = new Map(readArray(dv, header.fieldDefaultValuesOffset, header.fieldDefaultValuesSize, DEFVAL, v).map((x) => [x.index, x]));
-  md.paramDefaults = new Map(readArray(dv, header.parameterDefaultValuesOffset, header.parameterDefaultValuesSize, DEFVAL, v).map((x) => [x.index, x]));
-  md.stringLiterals = readArray(dv, header.stringLiteralOffset, header.stringLiteralSize, STRLIT, v);
-  md.genericContainers = readArray(dv, header.genericContainersOffset, header.genericContainersSize, GCONTAINER, v);
-  md.genericParameters = readArray(dv, header.genericParametersOffset, header.genericParametersSize, GPARAM, v);
+  best.guessed = !first.includes(best.version);
+  return best;
+}
+
+// How well a parsed layout fits the file: the share of sampled records whose indices make sense.
+function layoutFit(md) {
+  const { u8, header } = md;
+  const strStart = header.stringOffset, strSize = header.stringSize;
+  const nameOk = (i) => i >= 0 && i < strSize && (i === 0 || u8[strStart + i - 1] === 0);
+  const nt = md.typeDefs.length, nm = md.methodDefs.length, nf = md.fieldDefs.length, np = md.paramDefs.length;
+  if (!nt || !md.images.length) return 0;
+  let ok = 0, all = 0;
+  const check = (c) => { all++; if (c) ok++; };
+  // the header ends where the first section starts
+  check(header.stringLiteralOffset === header.size);
+  for (const im of md.images) check(nameOk(im.nameIndex) && im.typeStart >= 0 && im.typeStart + im.typeCount <= nt);
+  // from v38 every section says how many records it holds
+  if (md.version >= 38) {
+    for (const [name, arr] of [['typeDefinitions', md.typeDefs], ['methods', md.methodDefs], ['fields', md.fieldDefs], ['parameters', md.paramDefs], ['images', md.images]]) {
+      check(arr.length * (md.recordSizes[name] || 0) === header[name + 'Size']);
+    }
+  } else {
+    for (const name of ['typeDefinitions', 'methods', 'fields', 'parameters', 'images']) check(md.recordSizes[name] && header[name + 'Size'] % md.recordSizes[name] === 0);
+  }
+  const sample = (n, f) => { const step = Math.max(1, Math.floor(n / 3000)); for (let i = 0; i < n; i += step) f(i); };
+  sample(nt, (i) => {
+    const t = md.typeDefs[i];
+    check(nameOk(t.nameIndex) && nameOk(t.namespaceIndex));
+    if (t.method_count) check(t.methodStart >= 0 && t.methodStart + t.method_count <= nm);
+    if (t.field_count) check(t.fieldStart >= 0 && t.fieldStart + t.field_count <= nf);
+  });
+  sample(nm, (i) => {
+    const m = md.methodDefs[i];
+    check(nameOk(m.nameIndex) && m.declaringType >= 0 && m.declaringType < nt && (!m.parameterCount || (m.parameterStart >= 0 && m.parameterStart + m.parameterCount <= np)));
+  });
+  sample(nf, (i) => check(nameOk(md.fieldDefs[i].nameIndex)));
+  sample(np, (i) => check(nameOk(md.paramDefs[i].nameIndex)));
+  return all ? ok / all : 0;
+}
+
+function readMetadataAs(u8, dv, rawVersion, v, typeWidth) {
+  const header = readHeader(dv, v);
+  if (header.stringLiteralOffset && header.stringLiteralOffset < header.size) throw new Error(`metadata v${rawVersion} has a header layout ReSourcefy doesn't know`);
+  for (const [name, min = 0, max = 9999] of SECTIONS) {
+    if (v < min || v > max) continue;
+    const off = header[name + 'Offset'], size = header[name + 'Size'];
+    if (!size) continue;
+    if (size < 0 || off + size > u8.length) throw new Error(`metadata v${rawVersion}: section ${name} lies outside the file (unsupported layout or protected metadata)`);
+  }
+  // index widths (v38+: sized by the table they point into)
+  const W = {};
+  if (v >= 38) {
+    const c = (n) => header[n + 'Count'] || 0;
+    W.td = widthFor(c('typeDefinitions'));
+    W.gc = widthFor(c('genericContainers'));
+    // an interface offset is {type index, int32 offset}, which gives away the width of type indices
+    W.type = typeWidth || (c('interfaceOffsets') > 0 ? header.interfaceOffsetsSize / c('interfaceOffsets') - 4 : 4);
+    if (![1, 2, 4].includes(W.type)) W.type = 4;
+    W.param = v >= 39 ? widthFor(c('parameters')) : 4;
+    W.io = v >= 104 ? widthFor(c('interfaceOffsets')) : 4;
+    W.ev = v >= 104 ? widthFor(c('events')) : 4;
+    W.pr = v >= 104 ? widthFor(c('properties')) : 4;
+    W.nt = v >= 104 ? widthFor(c('nestedTypes')) : 4;
+    W.m = v >= 105 ? widthFor(c('methods')) : 4;
+    W.gp = v >= 106 ? widthFor(c('genericParameters')) : 4;
+    W.f = v >= 106 ? widthFor(c('fields')) : 4;
+    W.dv = v >= 106 ? widthFor(c('fieldAndParameterDefaultValueData')) : 4;
+  }
+  const cnt = (name) => (v >= 38 ? header[name + 'Count'] : null);
+  const recordSizes = {};
+  const table = (name, spec, what) => {
+    recordSizes[name] = compile(spec, v, W).size;
+    return readRecords(dv, header[name + 'Offset'], header[name + 'Size'], cnt(name), spec, v, W, what);
+  };
+  const md = { u8, dv, rawVersion, version: v, header, widths: W, recordSizes };
+  md.images = table('images', IMAGE, 'image');
+  md.typeDefs = table('typeDefinitions', TYPEDEF, 'type');
+  md.methodDefs = table('methods', METHOD, 'method');
+  md.paramDefs = table('parameters', PARAM, 'parameter');
+  md.fieldDefs = table('fields', FIELD, 'field');
+  // a wrong layout shows up in these tables already; skip the rest when they don't fit
+  md.fit = layoutFit(md);
+  if (md.fit < 0.9) return md;
+  md.propertyDefs = table('properties', PROPERTY, 'property');
+  md.eventDefs = table('events', EVENT, 'event');
+  md.fieldDefaults = new Map(table('fieldDefaultValues', FIELD_DEFVAL, 'field default value').map((x) => [x.index, x]));
+  md.paramDefaults = new Map(table('parameterDefaultValues', PARAM_DEFVAL, 'parameter default value').map((x) => [x.index, x]));
+  md.stringLiterals = table('stringLiteral', STRLIT, 'string literal');
+  if (v >= 35) {
+    // lengths are implied by where the next literal starts
+    const lits = md.stringLiterals;
+    for (let i = 0; i < lits.length; i++) lits[i].length = (i + 1 < lits.length ? lits[i + 1].dataIndex : header.stringLiteralDataSize) - lits[i].dataIndex;
+  }
+  md.genericContainers = table('genericContainers', GCONTAINER, 'generic container');
+  md.genericParameters = table('genericParameters', GPARAM, 'generic parameter');
   md.nestedTypes = int32s(dv, header.nestedTypesOffset, header.nestedTypesSize);
-  md.interfaces = int32s(dv, header.interfacesOffset, header.interfacesSize);
+  md.interfaces = (W.type || 4) === 4 ? int32s(dv, header.interfacesOffset, header.interfacesSize) : indices(dv, header.interfacesOffset, header.interfacesSize, W.type);
+  const nt = md.typeDefs.length;
+  const strStart = header.stringOffset, strEnd = header.stringOffset + header.stringSize;
   md.strCache = new Map();
   md.str = (idx) => {
     let s = md.strCache.get(idx);
     if (s !== undefined) return s;
-    const start = header.stringOffset + idx;
+    const start = strStart + idx;
+    if (!(idx >= 0) || start >= strEnd) return '';
     let e = start;
-    while (e < u8.length && u8[e]) e++;
+    while (e < strEnd && u8[e]) e++;
     s = new TextDecoder().decode(u8.subarray(start, e));
     md.strCache.set(idx, s);
     return s;
   };
+  const litStart = header.stringLiteralDataOffset, litEnd = litStart + header.stringLiteralDataSize;
   md.literal = (i) => {
     const l = md.stringLiterals[i];
-    const o = header.stringLiteralDataOffset + l.dataIndex;
-    return new TextDecoder().decode(u8.subarray(o, o + l.length));
+    if (!l) return '';
+    const o = Math.max(litStart, Math.min(litEnd, litStart + l.dataIndex));
+    return new TextDecoder().decode(u8.subarray(o, Math.min(litEnd, o + Math.max(0, l.length))));
   };
-  md.typeName = (ti) => md.str(md.typeDefs[ti].nameIndex);
-  // image index of each type
-  md.typeImage = new Int32Array(md.typeDefs.length).fill(-1);
-  md.images.forEach((img, ii) => { for (let t = img.typeStart; t < img.typeStart + img.typeCount; t++) md.typeImage[t] = ii; });
+  md.typeName = (ti) => (md.typeDefs[ti] ? md.str(md.typeDefs[ti].nameIndex) : '');
+  // image index of each type; a type outside every image keeps -1
+  md.typeImage = new Int32Array(nt).fill(-1);
+  md.images.forEach((img, ii) => {
+    const end = Math.min(nt, img.typeStart + img.typeCount);
+    for (let t = Math.max(0, img.typeStart); t < end; t++) md.typeImage[t] = ii;
+  });
+  // only types in an image's range are listed under it
+  md.imageTypes = (ii) => {
+    const img = md.images[ii];
+    if (!img) return [0, 0];
+    const s = Math.max(0, Math.min(nt, img.typeStart));
+    return [s, Math.max(s, Math.min(nt, img.typeStart + img.typeCount))];
+  };
   return md;
 }
 
-function layoutLooksRight(md) {
-  let ok = 0;
-  for (const m of md.methodDefs.slice(0, 50)) if (m.declaringType >= 0 && m.declaringType < md.typeDefs.length && m.parameterCount < 64) ok++;
-  return ok > 40 || md.methodDefs.length < 50;
+function indices(dv, off, size, w) {
+  const n = Math.floor(size / w), a = new Int32Array(n);
+  for (let i = 0; i < n; i++) a[i] = w === 1 ? dv.getUint8(off + i) : dv.getUint16(off + i * 2, true);
+  return a;
 }
 
 function int32s(dv, off, size) {
@@ -155,22 +307,33 @@ export class Il2CppBinary {
   valid(va) { const o = this.map(va); return o >= 0 && o < this.mem.length; }
 
   // Find Il2CppMetadataRegistration by its {N, ptr, N, ptr} signature (fieldOffsets / typeDefinitionsSizes).
-  findMetadataRegistration(typeDefCount) {
+  // The {typesCount, types} pair sits 4 pointer slots before it, or 2 from metadata v108 (which
+  // moved the generic method table and method specs out of the binary).
+  findMetadataRegistration(typeDefCount, version = 0) {
     const P = this.ptrSize;
+    const layouts = version >= 108 ? [[2, 6], [4, 10]] : [[4, 10], [2, 6]]; // [types slot, struct start] before the signature
     for (const [start, end] of this.dataRanges) {
       for (let o = start - (start % P); o + 4 * P <= end; o += P) {
         if (this.ptrAt(o) !== typeDefCount) continue;
         if (this.ptrAt(o + 2 * P) !== typeDefCount) continue;
         const p1 = this.ptrAt(o + P), p2 = this.ptrAt(o + 3 * P);
         if (!this.valid(p1) || !this.valid(p2)) continue;
-        const mr = o - 10 * P;
-        const typesCount = this.ptrAt(mr + 6 * P), types = this.ptrAt(mr + 7 * P);
-        if (typesCount < typeDefCount || typesCount > typeDefCount * 64 || !this.valid(types)) continue;
-        // first type pointers must be valid
-        let good = 0;
-        for (let i = 0; i < Math.min(16, typesCount); i++) if (this.valid(this.ptr(types + i * P))) good++;
-        if (good < Math.min(16, typesCount) - 1) continue;
-        return { offset: mr, typesCount, types, genericClassesCount: this.ptrAt(mr), genericInstsCount: this.ptrAt(mr + 2 * P), fieldOffsets: p1 };
+        for (const [typesBack, structBack] of layouts) {
+          const typesCount = this.ptrAt(o - typesBack * P), types = this.ptrAt(o - typesBack * P + P);
+          if (typesCount < typeDefCount || typesCount > typeDefCount * 64 || !this.valid(types)) continue;
+          // the first type pointers must lead to plausible Il2CppType records
+          let good = 0;
+          const n = Math.min(16, typesCount);
+          for (let i = 0; i < n; i++) {
+            const tp = this.ptr(types + i * P);
+            if (!this.valid(tp)) continue;
+            const kind = (this.u32(tp + P) >>> 16) & 0xff;
+            if (kind >= 1 && kind <= 0x55) good++;
+          }
+          if (good < n - 1) continue;
+          const mr = o - structBack * P;
+          return { offset: mr, typesCount, types, genericClassesCount: this.ptrAt(mr), genericInstsCount: this.ptrAt(mr + 2 * P), fieldOffsets: p1 };
+        }
       }
     }
     return null;
@@ -249,7 +412,7 @@ export class Il2CppModel {
     this.md = md;
     this.bin = bin;
     this.newBits = md.version >= 29 || (opts.unityMajor >= 2021 && md.version >= 27);
-    this.reg = bin ? bin.findMetadataRegistration(md.typeDefs.length) : null;
+    this.reg = bin ? bin.findMetadataRegistration(md.typeDefs.length, md.version) : null;
     this.typePtrs = null;
     if (this.reg) {
       const P = bin.ptrSize;
@@ -271,8 +434,9 @@ export class Il2CppModel {
     return v >= 0 && v < 1 << 24 ? v : null;
   }
 
-  typeDefFullName(ti, withNs = false) {
+  typeDefFullName(ti, withNs = false, depth = 0) {
     const md = this.md, td = md.typeDefs[ti];
+    if (!td) return '?';
     let name = md.str(td.nameIndex);
     if (td.genericContainerIndex >= 0 && !name.includes('<')) {
       const gc = md.genericContainers[td.genericContainerIndex];
@@ -284,7 +448,7 @@ export class Il2CppModel {
     } else name = name.replace(/`\d+$/, '');
     if (td.declaringTypeIndex >= 0 && this.typePtrs) {
       const dt = this.resolveTypeDefIndex(td.declaringTypeIndex);
-      if (dt >= 0) name = this.typeDefFullName(dt, withNs) + '.' + name;
+      if (dt >= 0 && dt !== ti && depth < 16) name = this.typeDefFullName(dt, withNs, depth + 1) + '.' + name;
     } else if (withNs) {
       const ns = md.str(td.namespaceIndex);
       if (ns) name = ns + '.' + name;
@@ -294,11 +458,11 @@ export class Il2CppModel {
 
   resolveTypeDefIndex(typeIndex) {
     const t = this.typeAt(typeIndex);
-    return t && (t.type === 0x11 || t.type === 0x12) ? t.data : -1;
+    return t && (t.type === 0x11 || t.type === 0x12) && t.data < this.md.typeDefs.length ? t.data : -1;
   }
 
   typeAt(typeIndex) {
-    if (!this.typePtrs || typeIndex < 0 || typeIndex >= this.typePtrs.length) return null;
+    if (!this.typePtrs || !(typeIndex >= 0) || typeIndex >= this.typePtrs.length) return null;
     return this.bin.readType(this.typePtrs[typeIndex], this.newBits);
   }
 
@@ -400,8 +564,9 @@ function defaultValueText(md, def, typeName) {
 }
 
 // Build C#-like source for one type definition. methodInfo(mi) -> comment string (address/wasm)
-export function dumpType(model, ti, { methodInfo, indent = '' } = {}) {
+export function dumpType(model, ti, { methodInfo, indent = '', depth = 0 } = {}) {
   const md = model.md, td = md.typeDefs[ti];
+  if (!td) return `${indent}// TypeDefIndex ${ti} is not in the metadata`;
   const L = [];
   const name = model.typeDefFullName(ti).split('.').pop();
   const [kw, parent] = typeKeyword(md, td, model, ti);
@@ -414,7 +579,7 @@ export function dumpType(model, ti, { methodInfo, indent = '' } = {}) {
   }
   const bases = [];
   if (parent) bases.push(parent);
-  if (model.hasTypes) for (let i = 0; i < td.interfaces_count; i++) bases.push(model.typeName(md.interfaces[td.interfacesStart + i]));
+  if (model.hasTypes) for (let i = 0; i < td.interfaces_count; i++) { const it = md.interfaces[td.interfacesStart + i]; if (it != null) bases.push(model.typeName(it)); }
   if (kw === 'enum' && model.hasTypes && td.elementTypeIndex >= 0) { const et = model.typeName(td.elementTypeIndex); if (et && et !== 'int') bases.push(et); }
   L.push(`${indent}// TypeDefIndex: ${ti}${td.token ? ` · Token: 0x${td.token.toString(16).toUpperCase()}` : ''}`);
   L.push(`${indent}${access} ${mods.join(' ')}${mods.length ? ' ' : ''}${kw} ${name}${bases.length ? ' : ' + bases.join(', ') : ''}`);
@@ -462,7 +627,7 @@ export function dumpType(model, ti, { methodInfo, indent = '' } = {}) {
       let ptype = 'object';
       if (model.hasTypes) {
         if (getM) ptype = model.typeName(getM.returnType);
-        else if (setM && setM.parameterCount) ptype = model.typeName(md.paramDefs[setM.parameterStart + setM.parameterCount - 1].typeIndex);
+        else if (setM && setM.parameterCount) { const pd = md.paramDefs[setM.parameterStart + setM.parameterCount - 1]; if (pd) ptype = model.typeName(pd.typeIndex); }
       }
       const acc = any ? methodAccess(any.flags) : 'public';
       const st = any && (any.flags & 0x10) ? ' static' : '';
@@ -509,15 +674,15 @@ export function dumpType(model, ti, { methodInfo, indent = '' } = {}) {
     }
   }
   // nested types
-  for (let i = 0; i < td.nested_type_count; i++) {
+  for (let i = 0; i < td.nested_type_count && depth < 16; i++) {
     const nti = md.nestedTypes[td.nestedTypesStart + i];
-    if (nti >= 0 && nti < md.typeDefs.length) { L.push(''); L.push(dumpType(model, nti, { methodInfo, indent: inner })); }
+    if (nti >= 0 && nti < md.typeDefs.length && nti !== ti) { L.push(''); L.push(dumpType(model, nti, { methodInfo, indent: inner, depth: depth + 1 })); }
   }
   L.push(`${indent}}`);
   return L.join('\n');
 }
 
-export function isTopLevel(md, ti) { return md.typeDefs[ti].declaringTypeIndex < 0; }
+export function isTopLevel(md, ti) { const td = md.typeDefs[ti]; return !!td && td.declaringTypeIndex < 0; }
 
 // Rebuild the string literal table with edited values (appends new data at the end).
 export function rewriteStringLiterals(md, values) {
@@ -532,17 +697,20 @@ export function rewriteStringLiterals(md, values) {
   const dv = new DataView(out.buffer);
   const dataOff = oldLen + pad;
   let o = 0;
-  const L = layout(STRLIT, md.version);
+  const L = compile(STRLIT, md.version, md.widths || {});
+  const withLength = L.fields.some(([n]) => n === 'length');
   for (let i = 0; i < parts.length && i < md.stringLiterals.length; i++) {
     out.set(parts[i], dataOff + o);
     const rec = md.header.stringLiteralOffset + i * L.size;
-    dv.setUint32(rec, parts[i].length, true);
-    dv.setInt32(rec + 4, o, true);
+    if (withLength) { dv.setUint32(rec, parts[i].length, true); dv.setInt32(rec + 4, o, true); }
+    else dv.setInt32(rec, o, true); // v35+: lengths follow from the next literal's start
     o += parts[i].length;
   }
-  // header fields: stringLiteralDataOffset (offset 16), stringLiteralDataSize (20)
-  dv.setUint32(16, dataOff, true);
-  dv.setInt32(20, total, true);
+  // the stringLiteralData section now points at the appended data
+  const pos = md.header.positions.stringLiteralData;
+  dv.setUint32(pos, dataOff, true);
+  dv.setInt32(pos + 4, total, true);
+  if (md.version >= 38) dv.setInt32(pos + 8, total, true);
   return out;
 }
 

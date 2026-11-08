@@ -169,11 +169,43 @@ export function funcType(m, i) {
 
 // Linear memory image built from active data segments (32-bit address space).
 export function buildMemory(m, u8) {
+  const placed = m.data.map((d) => d.offset);
+  // passive segments (threaded builds) are copied in by memory.init calls in the code
+  if (m.data.some((d) => d.offset == null && d.flags === 1)) {
+    for (const [seg, dest] of passiveSegmentTargets(m, u8)) if (placed[seg] == null) placed[seg] = dest;
+  }
   let size = 0;
-  for (const d of m.data) if (d.offset != null) size = Math.max(size, d.offset + d.size);
+  m.data.forEach((d, i) => { if (placed[i] != null) size = Math.max(size, placed[i] + d.size); });
+  if (size > 0x7fffffff) throw new Error('the data segments do not fit in 2 GB of memory');
   const mem = new Uint8Array(size);
-  for (const d of m.data) if (d.offset != null) mem.set(u8.subarray(d.at, d.at + d.size), d.offset);
+  m.data.forEach((d, i) => { if (placed[i] != null) mem.set(u8.subarray(d.at, d.at + d.size), placed[i]); });
   return mem;
+}
+
+// Destination of each passive data segment, from `i32.const dest; i32.const src; i32.const n; memory.init seg 0`.
+function passiveSegmentTargets(m, u8) {
+  const out = new Map();
+  const sleb = (p) => { let v = 0, shift = 0, b; do { b = u8[p++]; v |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80 && shift < 35); if (shift < 32 && (b & 0x40)) v |= -1 << shift; return [v, p]; };
+  const consts = (p, end) => {
+    const vals = [];
+    for (let k = 0; k < 3; k++) { if (u8[p] !== 0x41) return null; const [v, q] = sleb(p + 1); vals.push(v); p = q; }
+    return p === end ? vals : null;
+  };
+  for (const c of m.codes) {
+    const end = c.offset + c.size;
+    for (let p = c.offset; p < end - 3; p++) {
+      if (u8[p] !== 0xfc || u8[p + 1] !== 0x08) continue;
+      let q = p + 2, seg = 0, shift = 0, b;
+      do { b = u8[q++]; seg |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80 && shift < 35);
+      if (u8[q] !== 0x00 || out.has(seg) || !m.data[seg]) continue;
+      // three i32.const operands end right before the opcode; each takes 2 to 6 bytes
+      for (let s = p - 6; s >= Math.max(c.offset, p - 18); s--) {
+        const vals = consts(s, p);
+        if (vals && vals[1] === 0 && vals[0] >= 0) { out.set(seg, vals[0]); break; }
+      }
+    }
+  }
+  return out;
 }
 
 // table index -> function index (table 0)

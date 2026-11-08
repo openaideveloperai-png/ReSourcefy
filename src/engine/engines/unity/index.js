@@ -465,7 +465,8 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
   await ctx.yield();
   const metaBytes = await ctx.vfs.bytes(metaEntry);
   const md = parseMetadata(metaBytes);
-  ctx.detail('unity', 'IL2CPP metadata', `v${md.version}${md.rawVersion !== md.version ? ` (file says ${md.rawVersion})` : ''} · ${md.typeDefs.length.toLocaleString()} types · ${md.methodDefs.length.toLocaleString()} methods`);
+  ctx.detail('unity', 'IL2CPP metadata', `v${md.rawVersion}${md.rawVersion !== md.version ? ` (read as v${md.version})` : ''} · ${md.typeDefs.length.toLocaleString()} types · ${md.methodDefs.length.toLocaleString()} methods`);
+  if (md.guessed) ctx.note('info', `global-metadata.dat says v${md.rawVersion}, but its tables match the v${md.version} layout, so it was read that way.`, metaEntry.path);
   const imageNames = md.images.map((im) => md.str(im.nameIndex));
   const gameImages = imageNames.filter((n) => !/^(mscorlib|System|Mono\.|UnityEngine|Unity\.|netstandard|Microsoft\.|__Generated)/i.test(n));
   ctx.detail('unity', 'Game assemblies', gameImages.join(', ') || '(none found)');
@@ -541,8 +542,8 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
   for (let img = 0; img < md.images.length; img++) {
     const asm = imageNames[img].replace(/\.dll$/i, '');
     if (!gameImages.includes(imageNames[img])) continue;
-    const im = md.images[img];
-    for (let ti = im.typeStart; ti < im.typeStart + im.typeCount; ti++) {
+    const [typeStart, typeEnd] = md.imageTypes(img);
+    for (let ti = typeStart; ti < typeEnd; ti++) {
       if (!isTopLevel(md, ti)) continue;
       const td = md.typeDefs[ti];
       const nm = md.str(td.nameIndex);
@@ -572,9 +573,9 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
     producer: async () => {
       const out = [`// IL2CPP dump · metadata v${md.version} · ${md.typeDefs.length} types\n`];
       for (let img = 0; img < md.images.length; img++) {
-        const im = md.images[img];
+        const [typeStart, typeEnd] = md.imageTypes(img);
         out.push(`\n// ===== Image ${img}: ${imageNames[img]} =====\n`);
-        for (let ti = im.typeStart; ti < im.typeStart + im.typeCount; ti++) {
+        for (let ti = typeStart; ti < typeEnd; ti++) {
           if (!isTopLevel(md, ti)) continue;
           const ns = md.str(md.typeDefs[ti].namespaceIndex);
           out.push(`// Namespace: ${ns}\n${dumpType(model, ti, { methodInfo })}\n`);
@@ -610,11 +611,13 @@ async function il2cppDump(ctx, env, metaEntry, web, unityMajor) {
 function wasmForType(md, model, ti, methodTarget, wasmInfo) {
   const td = md.typeDefs[ti];
   const out = [`;; WebAssembly for ${model.typeDefFullName(ti, true)} (IL2CPP-compiled methods)`, ''];
-  const visit = (t) => {
+  const visit = (t, depth) => {
     const d = md.typeDefs[t];
+    if (!d || depth > 16) return;
     for (let i = 0; i < d.method_count; i++) {
       const mi = d.methodStart + i;
       const m = md.methodDefs[mi];
+      if (!m) continue;
       const target = methodTarget(mi, m, t);
       const label = `${model.typeDefFullName(t)}.${md.str(m.nameIndex)}`;
       if (!target || target.wasm == null) { out.push(`;; ${label}: no compiled body (abstract, extern or generic)`, ''); continue; }
@@ -622,9 +625,9 @@ function wasmForType(md, model, ti, methodTarget, wasmInfo) {
       try { out.push(disassembleFunction(wasmInfo.m, wasmInfo.u8, target.wasm, { maxInstr: 20000 })); } catch (e) { out.push(`;; could not disassemble: ${e.message}`); }
       out.push('');
     }
-    for (let i = 0; i < d.nested_type_count; i++) visit(md.nestedTypes[d.nestedTypesStart + i]);
+    for (let i = 0; i < d.nested_type_count; i++) { const n = md.nestedTypes[d.nestedTypesStart + i]; if (n !== t) visit(n, depth + 1); }
   };
-  visit(ti);
+  visit(ti, 0);
   void td;
   return out.join('\n');
 }

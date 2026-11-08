@@ -1,6 +1,7 @@
 // Single-file compression wrappers: foo.gz -> foo, game.wasm.br -> game.wasm,
 // Unity's .unityweb (gzip or brotli) and zstd / lz4 frames.
 import { gunzip, brotliToBlob, zstd, lz4Frame, nativeDecompressToBlob, looksLikeUnityBrotli } from '../util/compress.js';
+import { sniffBytes } from '../sniff.js';
 
 function innerName(name, kind) {
   const lower = name.toLowerCase();
@@ -51,8 +52,27 @@ export default {
     }
     if (kind === 'brotli' && head[0] === 0x1f && head[1] === 0x8b) kind = 'gzip';
     const name = innerName(e.name, kind);
-    const data = await decompressEntry(ctx, e, kind);
+    let data;
+    try {
+      data = await decompressEntry(ctx, e, kind);
+    } catch (err) {
+      // Files keep their .br / .gz / .unityweb names when a web server or browser has already
+      // decoded them (common for downloaded web builds): use such files as they are.
+      const inner = alreadyDecoded(head);
+      if (!inner) throw err;
+      ctx.extract(`${e.path}/${name}`, await ctx.vfs.blob(e), { source: e.path });
+      e.meta = { ...(e.meta || {}), compression: 'none (already decompressed)', content: inner };
+      return;
+    }
     ctx.extract(`${e.path}/${name}`, data, { source: e.path });
     e.meta = { ...(e.meta || {}), compression: kind, unpackedSize: data.size };
   },
 };
+
+// What a file that failed to decompress holds instead, if it's recognizably uncompressed.
+function alreadyDecoded(head) {
+  // judge by content only: the name (game.framework.js) would claim text for any bytes
+  const t = sniffBytes(head, '');
+  if (!t || ['binary', 'gzip', 'brotli', 'zstd', 'lz4', 'unitybundle', 'unityassets'].includes(t.kind)) return null;
+  return t.label || t.kind;
+}
