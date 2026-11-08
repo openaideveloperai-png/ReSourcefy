@@ -7,7 +7,7 @@ const SHIM = typeof __RUNNER_SHIM__ !== 'undefined' ? __RUNNER_SHIM__ : '';
 let vendorManifest = null;
 
 // v: a runtime name, or { name, dir, rename: { from: to } } to place its files elsewhere
-async function loadVendor(v) {
+export async function loadVendor(v) {
   const name = typeof v === 'string' ? v : v.name;
   const dir = typeof v === 'string' || v.dir == null ? `__vendor/${name}/` : v.dir;
   const rename = (f) => { if (typeof v !== 'string' && v.rename) for (const [a, b] of Object.entries(v.rename)) if (f.startsWith(a)) return b + f.slice(a.length); return f; };
@@ -51,10 +51,11 @@ export class GameView {
     this.btnRestart = h('button', { class: 'btn sm', onclick: () => this.start(), title: 'Rebuild with your edits and restart' }, h('span', { html: icons.rebuild }), 'Restart');
     this.btnStop = h('button', { class: 'btn sm', onclick: () => this.stop(), disabled: true }, h('span', { html: icons.stop }), 'Stop');
     this.btnFull = h('button', { class: 'btn sm', onclick: () => this.fullscreen(), disabled: true }, h('span', { html: icons.expand }), 'Fullscreen');
+    this.btnDownload = h('button', { class: 'btn sm', onclick: () => this.app.exportGame(), title: 'Download the game with your edits as a zip you can host or share' }, h('span', { html: icons.download }), 'Download');
     // files the game asked for (or will ask for) that aren't in the upload
     this.missing = new Map();
     this.btnMissing = h('button', { class: 'btn sm warn', hidden: true, onclick: () => this.showMissing(), title: 'Files the game needs that are not in the upload' });
-    this.bar = h('div', { class: 'view-bar' }, h('span', { class: 'path' }, 'Game'), this.status, this.btnMissing, this.btnRestart, this.btnStop, this.btnFull);
+    this.bar = h('div', { class: 'view-bar' }, h('span', { class: 'path' }, 'Game'), this.status, this.btnMissing, this.btnRestart, this.btnStop, this.btnFull, this.btnDownload);
     this.el = [this.bar, this.stage];
     this.onMessage = (e) => this.message(e);
     window.addEventListener('message', this.onMessage);

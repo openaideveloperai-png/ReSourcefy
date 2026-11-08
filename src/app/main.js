@@ -8,7 +8,8 @@ import { overviewView, analysisJSON } from './overview.js';
 import { createEditor, formatCode, LANG_LABELS } from './viewers/code.js';
 import { imageViewer, audioViewer, videoViewer, fontViewer } from './viewers/media.js';
 import { hexViewer } from './viewers/hex.js';
-import { GameView } from './runner.js';
+import { GameView, loadVendor } from './runner.js';
+import { zipBlob } from '../engine/util/zipblob.js';
 import { filesFromDataTransfer, pickFiles } from './ingest.js';
 import { placeFiles } from './missing.js';
 import { saveFile, extAllowed, askClaude, getSample } from './caps.js';
@@ -575,6 +576,7 @@ class App {
       title: 'Export',
       body: h('div', { style: { display: 'grid', gap: '10px' } },
         h('p', null, 'Files are packed into a .zip in your browser and saved through the artifact\'s download prompt.'),
+        this.project.runnable ? h('button', { class: 'btn primary', onclick: () => this.exportGame() }, 'Playable game with your edits') : null,
         h('button', { class: 'btn', onclick: () => this.exportScope('project') }, 'Recovered project (Project folder)'),
         h('button', { class: 'btn', disabled: !modifiedCount, onclick: () => this.exportScope('modified') }, `Modified files only (${modifiedCount})`),
         h('button', { class: 'btn', onclick: () => this.exportScope('all') }, 'Everything (original + recovered)'),
@@ -595,6 +597,37 @@ class App {
       this.toast(res.ok ? `${res.message} (${r.count} files)` : res.message, { error: !res.ok });
     } catch (e) {
       this.toast('Export failed: ' + e.message, { error: true });
+    } finally { this.progress(null); }
+  }
+
+  // The game as it runs here (edits applied, runtime included), ready to put on a web host.
+  async exportGame() {
+    document.querySelector('.modal-back')?.remove();
+    if (!this.project || !this.project.runnable) { this.toast('This game has no web version to download.'); return; }
+    await this.saveAllTabs();
+    this.progress('Building the game', 0.05);
+    try {
+      const run = await this.engine.call('prepareRun', {});
+      if (!run || !run.files) throw new Error(run && run.reason ? run.reason : 'This game has no web version to download.');
+      const files = { ...run.files };
+      for (const v of run.vendor || []) Object.assign(files, await loadVendor(v));
+      // the start page ReSourcefy wrote becomes index.html
+      if (!files['index.html']) {
+        if (!run.entry.includes('/')) { files['index.html'] = files[run.entry]; delete files[run.entry]; }
+        else files['index.html'] = new Blob([`<!DOCTYPE html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${encodeURI(run.entry)}"><a href="${encodeURI(run.entry)}">Start the game</a>`], { type: 'text/html' });
+      }
+      const name = (this.project.name || 'game').replace(/[\\/:*?"<>|]+/g, '_');
+      files['README.txt'] = new Blob([`${this.project.name || 'This game'}, exported by ReSourcefy${(run.notes || []).some((n) => /edit/i.test(n)) ? ' with your edits' : ''}.\r\n\r\n` +
+        'To play it, put this folder on a web server: upload the zip to itch.io as an HTML game, or run\r\n' +
+        '"npx serve" or "python -m http.server" inside the folder and open the address it prints.\r\n' +
+        'Opening index.html straight from disk does not work in most browsers.\r\n'], { type: 'text/plain' });
+      for (const n of run.notes || []) this.log('info', n);
+      const blob = await zipBlob(Object.entries(files).map(([path, data]) => ({ path, data })), { onProgress: (f) => this.progress('Packing the game', 0.1 + f * 0.85) });
+      const res = await saveFile(`${name}-playable.zip`, blob);
+      this.toast(res.ok ? `${res.message} (${formatBytes(blob.size)})` : res.message, { error: !res.ok });
+    } catch (e) {
+      this.log('error', 'Download failed: ' + e.message);
+      this.toast('Download failed: ' + e.message, { error: true });
     } finally { this.progress(null); }
   }
 
