@@ -382,7 +382,8 @@ class App {
       try { tab.editor.setText(await formatCode(tab.editor.getText(), lang)); } catch (e) { this.toast('Format failed: ' + e.message, { error: true }); }
     }, title: 'Re-indent minified code' }, h('span', { html: icons.format }), 'Format') : null;
     const aiBtn = h('button', { class: 'btn sm', onclick: () => this.askAI(tab), title: 'Ask Claude to explain or clean up this code' }, h('span', { html: icons.spark }), 'Ask Claude');
-    const alts = (file.alts || []).length ? h('div', { class: 'seg' }, [h('button', { 'aria-pressed': 'true' }, file.altLabel || LANG_LABELS[lang] || lang), ...file.alts.map((a) => h('button', { 'aria-pressed': 'false', onclick: () => this.openFile(a.path) }, a.label))]) : null;
+    const altList = file.alts || file.related || [];
+    const alts = altList.length ? h('div', { class: 'seg' }, [h('button', { 'aria-pressed': 'true' }, file.altLabel || LANG_LABELS[lang] || lang), ...altList.map((a) => h('button', { 'aria-pressed': 'false', onclick: () => this.openFile(a.path) }, a.label))]) : null;
     const bar = h('div', { class: 'view-bar' },
       h('span', { class: 'path', title: file.path }, file.path),
       alts,

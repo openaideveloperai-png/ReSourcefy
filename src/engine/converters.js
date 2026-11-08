@@ -19,7 +19,9 @@ registerConverter('pe', async (ctx, e) => {
   const pe = parsePE(u8);
   const { text, versionInfo } = summarizePE(pe, e.name);
   let extra = '';
-  if (pe.clr) extra = '\n\n> This is a .NET assembly. Its decompiled C# is in the Project folder.';
+  if (pe.clr) extra = (e.actions || []).some((a) => a.id === 'dotnet.decompile')
+    ? '\n\n> This is a .NET library. Use **Decompile to C#** in the inspector to add its classes to Project/Scripts.'
+    : '\n\n> This is a .NET assembly. Its decompiled C# classes are in Project/Scripts, with IL next to them in Project/IL.';
   const icon = (() => { try { return readIcon(pe); } catch { return null; } })();
   return { view: 'code', lang: 'markdown', text: text + extra, readonly: true, meta: { versionInfo, icon: icon ? new Blob([icon.data], { type: icon.mime }) : null } };
 });
