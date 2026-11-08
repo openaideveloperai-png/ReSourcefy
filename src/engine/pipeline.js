@@ -207,6 +207,44 @@ export async function inspectFile(ctx, path) {
   return { path: e.path, rows, meta: e.meta || null, kind: e.kind, view: e.view, actions: e.actions || [] };
 }
 
+// ---------- game text ----------
+// Strings players see, gathered from script data (and optionally the strings in the game code),
+// as [{ path, label, field, value }].
+const TECHNICAL = /^(m_Name|m_MethodName|m_\w*AssemblyTypeName|m_\w*Trigger|m_EditorClassIdentifier|m_GUID|guid|m_AssetGUID|m_SubObjectName|m_SubObjectType|m_Path|m_PathName|m_ClassName|m_Namespace|m_AssemblyName|m_FontName|m_FontNames)$/;
+export async function gameTexts(ctx, { literals = false, limit = 20000 } = {}) {
+  const out = [];
+  const walk = (v, field, path, label) => {
+    if (out.length >= limit) return;
+    if (typeof v === 'string') {
+      const key = field.slice(field.lastIndexOf('.') + 1).replace(/\[\d+\]$/, '');
+      if (v.trim() && !TECHNICAL.test(key) && !/^[0-9a-f]{32}$/i.test(v) && !/^\d+(\.\d+)+[a-z]?\d*$/i.test(v)) out.push({ path, label, field, value: v, key });
+    } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${field}[${i}]`, path, label));
+    else if (v && typeof v === 'object' && !('m_PathID' in v)) for (const [k, x] of Object.entries(v)) walk(x, field ? `${field}.${k}` : k, path, label);
+  };
+  let n = 0;
+  for (const e of ctx.vfs.map.values()) {
+    if (!e.unity || e.unity.classId !== 114) continue;
+    try {
+      const j = JSON.parse(decodeText(new Uint8Array(await (await ctx.vfs.peekBlob(e)).arrayBuffer())));
+      walk(j, '', e.path, e.name.replace(/\.json$/, ''));
+    } catch { /* unreadable: skip */ }
+    if (++n % 200 === 0) { ctx.progress(`Collecting text (${n})`, 0.5); await ctx.yield(); }
+  }
+  if (literals) {
+    const lit = ctx.vfs.find((e) => e.origin === 'recovered' && /IL2CPP\/string-literals\.json$/.test(e.path));
+    if (lit) {
+      try {
+        const arr = JSON.parse(await ctx.vfs.text(lit));
+        arr.forEach((s, i) => { if (out.length < limit && typeof s === 'string' && /[A-Za-z]{2}/.test(s) && /\s/.test(s.trim())) out.push({ path: lit.path, label: 'Game code', field: `[${i}]`, value: s, key: 'code' }); });
+      } catch { /* ignore */ }
+    }
+  }
+  ctx.progress(null, 1);
+  // what players read first: UI text fields, then sentences, then the rest
+  const rank = (r) => (/^(m_text|text|m_label|label|title|m_title|message|description|dialogue|line|lines|caption|content)$/i.test(r.key) ? 0 : /\s/.test(r.value.trim()) ? 1 : 2);
+  return out.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(({ r }) => { delete r.key; return r; });
+}
+
 // ---------- thumbnails ----------
 const thumbCache = new Map();
 
@@ -282,7 +320,7 @@ export async function searchFiles(ctx, { query, regex = false, caseSensitive = f
       if (e.convertsToText && converters[e.kind]) {
         const r = await converters[e.kind](ctx, e);
         text = r && r.text;
-      } else text = decodeText(await ctx.vfs.bytes(e));
+      } else text = decodeText(new Uint8Array(await (await ctx.vfs.peekBlob(e)).arrayBuffer())); // generated files aren't kept
     } catch { continue; }
     if (!text) continue;
     scanned++;

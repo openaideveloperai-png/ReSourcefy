@@ -11,6 +11,7 @@ import { hexViewer } from './viewers/hex.js';
 import { GameView, loadVendor } from './runner.js';
 import { zipBlob } from '../engine/util/zipblob.js';
 import { galleryView } from './gallery.js';
+import { textsView } from './texts.js';
 import { filesFromDataTransfer, pickFiles } from './ingest.js';
 import { placeFiles } from './missing.js';
 import * as store from './store.js';
@@ -56,11 +57,12 @@ class App {
     this.playBtn = h('button', { class: 'btn primary play-btn keep', onclick: () => this.togglePlay(), title: 'Play (F5)' }, h('span', { html: icons.play }), h('span', { class: 'tb-label' }, 'Play'));
     this.exportBtn = h('button', { class: 'btn', onclick: () => this.exportDialog(), title: 'Export files' }, h('span', { html: icons.download }), h('span', { class: 'tb-label' }, 'Export'));
     this.openBtn = h('button', { class: 'btn keep', onclick: () => this.openDialog(), title: 'Open a game' }, h('span', { html: icons.plus }), h('span', { class: 'tb-label' }, 'Open game'));
+    this.textBtn = h('button', { class: 'btn', onclick: () => this.openTexts(), title: 'Every piece of text in the game, editable in one table' }, h('span', { html: icons.format }), h('span', { class: 'tb-label' }, 'Text'));
     this.imagesBtn = h('button', { class: 'btn', onclick: () => this.openGallery(), title: 'Every picture in the game (drop a file on one to replace it)' }, h('span', { html: icons.image }), h('span', { class: 'tb-label' }, 'Images'));
     const toolbar = h('header', { class: 'toolbar' },
       h('div', { class: 'brand', html: icons.logo + '<span>Re<b>Source</b>fy</span>' }),
       h('div', { class: 'project-id' }, this.nameEl, this.chipsEl),
-      h('div', { class: 'tb-actions' }, this.openBtn, this.imagesBtn, this.exportBtn, this.playBtn),
+      h('div', { class: 'tb-actions' }, this.openBtn, this.textBtn, this.imagesBtn, this.exportBtn, this.playBtn),
     );
 
     // Narrow screens: pane switcher
@@ -814,6 +816,17 @@ class App {
     const dlg = modal({ title: 'Go to file', body: h('div', { class: 'qo' }, input, list), actions: [] });
     dlg.el.classList.add('wide');
     render();
+  }
+
+  openTexts() {
+    let t = this.tabs.find('texts');
+    if (!t) {
+      t = this.tabs.add({ id: 'texts', kind: 'texts', title: 'Game text', icon: ['code', icons.format] });
+      this.texts = textsView(this);
+      this.tabs.setContent(t, { el: this.texts.el, destroy: () => { this.texts = null; } });
+    }
+    this.tabs.activate(t.id);
+    if (this.isNarrow()) this.showPane('editor');
   }
 
   openGallery() {

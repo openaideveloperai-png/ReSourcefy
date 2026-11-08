@@ -453,3 +453,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .qo-name { font-weight: 600; white-space: nowrap; }
 .qo-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
 .qo-empty { padding: 10px; }
+
+/* game text */
+.texts-bar .search-input { max-width: 240px; }
+.texts-bar .check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+.texts-body { overflow: auto; padding: 12px; }
+.texts-list { display: grid; gap: 8px; }
+.tx-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2.2fr); gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+.tx-row.changed { border-color: color-mix(in srgb, var(--warm) 55%, var(--line)); }
+.tx-meta { display: grid; gap: 2px; min-width: 0; }
+.tx-label { text-align: left; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-field { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.tx-value { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 6px; background: var(--sunken); padding: 6px 8px; font: inherit; field-sizing: content; min-height: 32px; max-height: 240px; }
+@media (max-width: 860px) { .tx-row { grid-template-columns: 1fr; } }

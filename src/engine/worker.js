@@ -2,7 +2,7 @@
 // editor UI. It owns the virtual file system, unpacks containers, detects the
 // engine, runs decompilers, and prepares runnable builds.
 import { Context } from './context.js';
-import { analyzeAll, openFile, inspectFile, searchFiles, prepareRun, exportFiles, runAction, writeFile, revertFile, readRange, trimCaches, thumbnails } from './pipeline.js';
+import { analyzeAll, openFile, inspectFile, searchFiles, prepareRun, exportFiles, runAction, writeFile, revertFile, readRange, trimCaches, thumbnails, gameTexts } from './pipeline.js';
 
 const ctx = new Context((msg) => self.postMessage(msg));
 
@@ -54,6 +54,7 @@ const methods = {
   async revert({ path }) { await revertFile(ctx, path); return { listing: ctx.vfs.listing() }; },
   async search(params) { return searchFiles(ctx, params); },
   async thumbs(params) { return thumbnails(ctx, params); },
+  async texts(params) { return gameTexts(ctx, params || {}); },
   async prepareRun(params) { const r = await prepareRun(ctx, params || {}); trimCaches(ctx); return r; },
   async trim() { trimCaches(ctx); return true; },
   // testing aid: force large-file (windowed) reading for files above `largeFile` bytes
