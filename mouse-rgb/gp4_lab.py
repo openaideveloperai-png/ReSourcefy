@@ -454,6 +454,129 @@ def reopen(d):
     return None
 
 
+# ---------------------------------------------------------------- control part helpers
+def open_control():
+    """Open the part of the mouse that takes settings (interface 1, usage page 0xff01, report 7)."""
+    for d in list_collections():
+        if d.get("usage_page") == 0xFF01:
+            try:
+                return open_path(d["path"])
+            except Exception as e:
+                say(f"Can't open the mouse's settings part: {e}")
+                return None
+    say("Couldn't find the mouse's settings part. Is it plugged in?")
+    return None
+
+
+def cmd(dev, body, label):
+    """Send one A704F command: 07 + up to 7 bytes. Returns True if the mouse accepted it."""
+    pkt = bytes(([7] + list(body) + [0] * 7)[:8])
+    if is_blocked(pkt):
+        say(f"SKIP {hx(pkt)} (blocked)")
+        return False
+    err = send_feature(dev, pkt)
+    say(f"OUT {hx(pkt)}  {label}  {'OK' if not err else 'FAILED: ' + err}")
+    return not err
+
+
+# ---------------------------------------------------------------- 5. lighting
+LIGHT_MODES = [("1", 0x10, "Breathing, slow (6 s)"), ("2", 0x11, "Breathing, slower (5 s)"),
+               ("3", 0x12, "Breathing, medium (4 s)"), ("4", 0x13, "Breathing, fast (3 s)"),
+               ("5", 0x14, "Breathing, faster (2 s)"), ("6", 0x15, "Breathing, very fast (1 s)"),
+               ("s", 0x16, "Static (light stays on)"), ("o", 0x17, "Off")]
+# Wheel-triggered effects: they happen when you ROLL the wheel. 0d (z-key spam) is never used.
+FLASHES = [("f", 0x09, "Flash"), ("r", 0x10, "Flash red"), ("u", 0x12, "Flash blue"),
+           ("m", 0x13, "Flash magenta"), ("k", 0x11, "Blink off and on"), ("t", 0x08, "Toggle light on/off")]
+
+
+def lighting():
+    dev = open_control()
+    if not dev:
+        return
+    try:
+        while True:
+            print("\n  LIGHTING (changes last until you unplug the mouse)")
+            for key, _, name in LIGHT_MODES:
+                print(f"   {key}) {name}")
+            print("   -- wheel effects: you roll the wheel to trigger them --")
+            for key, _, name in FLASHES:
+                print(f"   {key}) {name}")
+            print("   z) Freeze on a colour (restart the cycle, wait, then switch to static)")
+            print("   b) Back to the main menu")
+            choice = ask("Choose: ").lower()
+            if choice in ("b", ""):
+                break
+            mode = next((m for m in LIGHT_MODES if m[0] == choice), None)
+            flash = next((f for f in FLASHES if f[0] == choice), None)
+            if mode:
+                cmd(dev, [0x13, 0x7F, mode[1]], mode[2])
+            elif flash:
+                if cmd(dev, [0x11, 0x02, flash[1]], f"wheel = {flash[2]}"):
+                    try:
+                        ask("Roll the wheel now and watch the light. Press Enter when done. ")
+                    finally:
+                        cmd(dev, [0x11, 0x00, 0x00], "normal scrolling")
+            elif choice == "z":
+                freeze(dev)
+    finally:
+        dev.close()
+
+
+def freeze(dev):
+    speed = ask("Breathing speed 1-6 (1 = slowest) [1]: ") or "1"
+    wait = ask("Seconds to wait before freezing, e.g. 2.5 [2]: ") or "2"
+    try:
+        code = 0x0F + int(speed)
+        seconds = float(wait)
+        assert 0x10 <= code <= 0x15 and 0 <= seconds <= 60
+    except Exception:
+        say("Please type a speed from 1 to 6 and a number of seconds.")
+        return
+    if cmd(dev, [0x13, 0x7F, code], "restart breathing"):
+        time.sleep(seconds)
+        cmd(dev, [0x13, 0x7F, 0x16], "static (freeze)")
+        say("If the light always freezes on the same colour, static is a fixed colour on this mouse.")
+
+
+# ---------------------------------------------------------------- 6. read-back experiment
+def readback_experiment():
+    say("\n=== WHY DID THE CHROME PAGE FAIL? ===")
+    say("The Chrome page read the mouse's memory 60 ms after each command. This program doesn't.")
+    say("This sends the volume command twice: once WITH that read-back, once WITHOUT.")
+    say("Scrolling is switched back to normal after each test.")
+    dev = open_control()
+    if not dev:
+        return
+    results = {}
+    try:
+        for name, read_back in (("WITH read-back", True), ("WITHOUT read-back", False)):
+            say(f"\n-- Test {name}")
+            ask("Press Enter to send. ")
+            if not cmd(dev, [0x11, 0x01, 0x00], "volume scrolling"):
+                continue
+            if read_back:
+                time.sleep(0.06)
+                back = read_feature(dev, 7, 7)
+                say(f"READ {hx(back) if isinstance(back, bytes) else back}")
+            try:
+                ask("Roll the wheel a few notches, then press Enter. ")
+                results[name] = yes("Did the Windows volume change?")
+            finally:
+                cmd(dev, [0x11, 0x00, 0x00], "normal scrolling")
+                time.sleep(0.3)
+    finally:
+        dev.close()
+    w, wo = results.get("WITH read-back"), results.get("WITHOUT read-back")
+    say("\nRESULT: with read-back =", "worked" if w else "no effect", "| without =", "worked" if wo else "no effect")
+    if wo and not w:
+        say("=> Reading right after sending cancels the command. The Chrome lighting page")
+        say("   (gp4-rgb.html) doesn't read back, so it should work. Option 5 here works too.")
+    elif w and wo:
+        say("=> Read-back isn't the problem. Chrome itself is the difference. Use option 5 here.")
+    elif not w and not wo:
+        say("=> Neither worked this time. Unplug and replug the mouse, then try option 3 again.")
+
+
 # ---------------------------------------------------------------- menu
 def main():
     say(f"\n===== GP4 mouse lab started {time.strftime('%Y-%m-%d')} =====")
@@ -463,6 +586,8 @@ def main():
   2) Watch the mouse live           (safe, read-only)
   3) A704F volume test, all parts   (low risk, always restores scrolling)
   4) Careful probe                  (expert, experimental commands)
+  5) Lighting controls              (the A704F lighting commands)
+  6) Why did Chrome fail? test      (low risk, always restores scrolling)
   q) Quit
 """)
         try:
@@ -474,6 +599,8 @@ def main():
             elif choice == "2": watch()
             elif choice == "3": a704_test()
             elif choice == "4": probe()
+            elif choice == "5": lighting()
+            elif choice == "6": readback_experiment()
             elif choice == "q": break
         except KeyboardInterrupt:
             say("Stopped.")

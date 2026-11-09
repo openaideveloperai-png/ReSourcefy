@@ -136,6 +136,7 @@
     <button id="copyBtn">Copy log</button>
     <button id="clearBtn">Clear log</button>
     <button class="safe" id="restoreBtn" disabled>Restore normal scrolling</button>
+    <label style="display:block;margin-top:8px"><input type="checkbox" id="readBackChk"> Read the mouse's memory back after each command (off by default: on the GP4 this seemed to cancel the command)</label>
   </section>
 </main>
 
@@ -271,8 +272,8 @@ async function send(data, label) {
     log(`OUT  07 ${hex(buf)}   FAILED: ${e.message}`, "bad");
     return false;
   }
-  await sleep(60);
-  await readBack(buf);
+  // Reading back right after sending seemed to cancel commands on the GP4, so it's off by default.
+  if ($("readBackChk").checked) { await sleep(60); await readBack(buf); }
   return true;
 }
 
