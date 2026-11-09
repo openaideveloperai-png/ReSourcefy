@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyboard Lab</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5b6470; --line: #d9dde3;
+    --accent: #2f6fde; --accent-text: #ffffff; --ok: #1f8a4c; --warn: #b26a00; --bad: #c0392b;
+    --code-bg: #f0f2f5; --log-bg: #0f1419; --log-text: #d7dde4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a; --panel: #1a1f26; --text: #e6e9ee; --muted: #9aa4b1; --line: #2c333d;
+      --accent: #5b8ff0; --accent-text: #0b0e12; --ok: #4cc27f; --warn: #e3a33b; --bad: #ef6b5b;
+      --code-bg: #222831; --log-bg: #0a0d11; --log-text: #cfd6de;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a; --panel: #1a1f26; --text: #e6e9ee; --muted: #9aa4b1; --line: #2c333d;
+    --accent: #5b8ff0; --accent-text: #0b0e12; --ok: #4cc27f; --warn: #e3a33b; --bad: #ef6b5b;
+    --code-bg: #222831; --log-bg: #0a0d11; --log-text: #cfd6de;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 8px; }
+  p, li { margin: 6px 0; }
+  .sub { color: var(--muted); margin-bottom: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 14px 0; }
+  .step { display: inline-block; min-width: 26px; height: 26px; line-height: 26px; text-align: center;
+          border-radius: 13px; background: var(--accent); color: var(--accent-text);
+          font-weight: 600; margin-right: 8px; font-size: .9rem; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); cursor: pointer; margin: 4px 6px 4px 0; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .9em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: .88rem; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tablewrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: .8rem; font-weight: 600;
+          border: 1px solid currentColor; margin-left: 4px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  .devcard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  #log { background: var(--log-bg); color: var(--log-text); border-radius: 8px; padding: 10px;
+         height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0; }
+  .banner { border-left: 4px solid var(--ok); padding: 8px 12px; background: var(--code-bg); border-radius: 6px; margin: 10px 0; }
+  .banner.bad { border-left-color: var(--bad); }
+  kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 5px; background: var(--code-bg); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Keyboard lab</h1>
+  <p class="sub">Identifies your gaming keyboard (for example a Xinmeng "Crazy Snake") and shows how it talks to the computer, as a first step towards controlling its lights.</p>
+  <div class="banner"><b>Read-only.</b> This page can't send anything to the keyboard: it only reads and listens. It can't change, break or reset your keyboard. Gaming keyboards save settings in their own memory, so sending untested commands is a risk we won't take until we know more.</div>
+  <div id="support"></div>
+
+  <section class="card">
+    <h2><span class="step">1</span>Connect</h2>
+    <p>Click <b>Connect</b>. Chrome shows a list of every USB device it can see. Pick your keyboard (its name may be something like "Gaming Keyboard", "USB Keyboard" or a code). If there are several entries with the same name, connect them all: click <b>Connect</b> again for each one.</p>
+    <p class="muted">Not sure which is the keyboard? Unplug it, click Connect and look at the list, then close it, plug the keyboard back in and look again. The new entries are your keyboard.</p>
+    <button class="primary" id="connectBtn">Connect</button>
+    <div id="devices"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">2</span>Read stored values</h2>
+    <p>Reads every "feature report" the keyboard offers. These are often where settings live. This only reads.</p>
+    <button id="readBtn" disabled>Read all feature reports</button>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">3</span>Change the lights with the keyboard and watch</h2>
+    <p>Most of these keyboards change lighting with key combinations. Try these one at a time and watch both the keyboard and the log below:</p>
+    <ul>
+      <li>A key with a light-bulb or sun symbol (often <kbd>Scroll Lock</kbd> or <kbd>Pause</kbd>) on its own</li>
+      <li><kbd>Fn</kbd> + <kbd>Ins</kbd>, <kbd>Home</kbd>, <kbd>PgUp</kbd>, <kbd>Del</kbd>, <kbd>End</kbd>, <kbd>PgDn</kbd> (lighting modes on many boards)</li>
+      <li><kbd>Fn</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> (brightness) and <kbd>Fn</kbd> + <kbd>←</kbd> / <kbd>→</kbd> (speed)</li>
+      <li><kbd>Fn</kbd> + <kbd>1</kbd> to <kbd>9</kbd>, and <kbd>Fn</kbd> + <kbd>\</kbd> (colour on some boards)</li>
+    </ul>
+    <p class="muted">These combinations are common on budget boards, but every model differs. They're safe to try: at worst the lights change or a key like Windows lock toggles (press the same combination again to undo). If the keyboard sends a message to the PC when the lights change, it shows up in the log as <code>IN</code>. That would be a big clue.</p>
+    <p>Messages from the keyboard so far: <b id="inCount">0</b></p>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <div id="log" class="mono" role="log" aria-live="polite"></div>
+    <button class="primary" id="copyBtn">Copy everything for sharing</button>
+    <button id="clearBtn">Clear log</button>
+  </section>
+</main>
+
+<script>
+"use strict";
+// This page deliberately never calls sendReport or sendFeatureReport.
+const $ = (id) => document.getElementById(id);
+const hex = (arr) => Array.from(arr, b => b.toString(16).padStart(2, "0")).join(" ");
+const h = (n, w = 2) => "0x" + n.toString(16).padStart(w, "0");
+let inCount = 0;
+const listening = new WeakSet();
+
+// Chip makers commonly found in budget keyboards, by USB vendor ID. Only a hint.
+const VENDORS = {
+  0x258a: "Sinowealth chip (very common in budget gaming keyboards)",
+  0x0c45: "SONiX / Microdia chip",
+  0x04d9: "Holtek chip",
+  0x1a2c: "China Resource Semico chip",
+  0x320f: "Evision chip",
+  0x0416: "Winbond / Nuvoton chip",
+  0x1ea7: "Semitek / SHARKOON chip",
+  0x3151: "keyboard chip vendor 0x3151",
+  0x05ac: "reports itself as Apple (some clone keyboards do this)",
+};
+
+function log(msg, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `${new Date().toLocaleTimeString([], { hour12: false })}  ${msg}`;
+  $("log").appendChild(line);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+if (!("hid" in navigator)) {
+  $("support").innerHTML = `<div class="banner bad"><b>This browser can't talk to USB devices (no WebHID).</b>
+  Open this file in <b>Google Chrome</b> or <b>Microsoft Edge</b> on a desktop computer (right-click the file, <b>Open with</b>).</div>`;
+  $("connectBtn").disabled = true;
+}
+
+function reportBytes(report) {
+  let bits = 0;
+  for (const item of report.items || []) bits += item.reportSize * item.reportCount;
+  return Math.ceil(bits / 8);
+}
+function flat(cols, depth = 0, out = []) {
+  for (const c of cols || []) { out.push({ c, depth }); flat(c.children, depth + 1, out); }
+  return out;
+}
+function usageName(page, usage) {
+  if (page === 0x01 && usage === 0x06) return "keyboard";
+  if (page === 0x01 && usage === 0x02) return "mouse";
+  if (page === 0x01 && usage === 0x80) return "system control (power/sleep)";
+  if (page === 0x0c) return "media keys";
+  if (page >= 0xff00) return "vendor-defined (where lighting control usually lives)";
+  return "";
+}
+
+function describeDevice(d) {
+  const lines = [`Device: "${d.productName}"  ${h(d.vendorId, 4)}:${h(d.productId, 4)}  ${VENDORS[d.vendorId] || ""}`];
+  for (const { c, depth } of flat(d.collections)) {
+    lines.push(`${"  ".repeat(depth + 1)}collection usage page ${h(c.usagePage, 4)} usage ${h(c.usage)} ${usageName(c.usagePage, c.usage)}`);
+    for (const [kind, arr] of [["input", c.inputReports], ["output", c.outputReports], ["feature", c.featureReports]])
+      for (const r of arr || []) lines.push(`${"  ".repeat(depth + 2)}${kind} report ID ${h(r.reportId)}: ${reportBytes(r)} bytes`);
+  }
+  return lines.join("\n");
+}
+
+async function render() {
+  const list = await navigator.hid.getDevices();
+  const box = $("devices");
+  box.innerHTML = "";
+  $("readBtn").disabled = !list.length;
+  if (!list.length) { box.innerHTML = `<p class="muted">Nothing connected yet.</p>`; return; }
+  for (const d of list) {
+    const card = document.createElement("div");
+    card.className = "devcard";
+    let rows = "";
+    let vendorCols = 0;
+    for (const { c, depth } of flat(d.collections)) {
+      if (c.usagePage >= 0xff00) vendorCols++;
+      const reps = [];
+      for (const [kind, arr] of [["input", c.inputReports], ["output", c.outputReports], ["feature", c.featureReports]])
+        for (const r of arr || []) reps.push(`${kind} ID ${h(r.reportId)} (${reportBytes(r)} bytes)`);
+      rows += `<tr><td class="mono">${"&nbsp;&nbsp;".repeat(depth)}${h(c.usagePage, 4)} / ${h(c.usage)}</td>
+               <td>${usageName(c.usagePage, c.usage)}</td><td class="mono">${reps.join("<br>") || "none"}</td></tr>`;
+    }
+    const chip = VENDORS[d.vendorId];
+    card.innerHTML = `<b></b> <span class="mono muted">${h(d.vendorId, 4)}:${h(d.productId, 4)}</span>
+      ${vendorCols ? `<span class="pill ok">${vendorCols} vendor part(s)</span>` : `<span class="pill muted">no vendor parts</span>`}
+      ${chip ? `<p class="muted" style="margin:4px 0">${chip}</p>` : ""}
+      <div class="tablewrap"><table><tr><th>Usage page / usage</th><th>What it is</th><th>Reports</th></tr>${rows}</table></div>`;
+    card.querySelector("b").textContent = d.productName || "(no name)";
+    box.appendChild(card);
+    await listen(d);
+  }
+}
+
+async function listen(d) {
+  if (listening.has(d)) return;
+  try {
+    if (!d.opened) await d.open();
+    d.addEventListener("inputreport", (e) => {
+      const bytes = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+      inCount++;
+      $("inCount").textContent = inCount;
+      log(`IN  ${h(d.productId, 4)} report ${h(e.reportId)}: ${hex(bytes)}`);
+    });
+    listening.add(d);
+    log(`Listening to "${d.productName}" ${h(d.vendorId, 4)}:${h(d.productId, 4)}`);
+  } catch (e) {
+    log(`Can't open "${d.productName}": ${e.message}. Another program (like the keyboard's own software) may be using it.`, "warn");
+  }
+}
+
+$("connectBtn").onclick = async () => {
+  try {
+    const picked = await navigator.hid.requestDevice({ filters: [] });
+    for (const d of picked) log(`Allowed: "${d.productName}" ${h(d.vendorId, 4)}:${h(d.productId, 4)}`);
+    if (!picked.length) log("Nothing was picked.");
+  } catch (e) { log(`Connect failed: ${e.message}`, "bad"); }
+  await render();
+};
+
+$("readBtn").onclick = async () => {
+  const list = await navigator.hid.getDevices();
+  let any = false;
+  for (const d of list) {
+    for (const { c } of flat(d.collections)) {
+      for (const r of c.featureReports || []) {
+        any = true;
+        try {
+          if (!d.opened) await d.open();
+          const dv = await d.receiveFeatureReport(r.reportId);
+          log(`READ ${h(d.productId, 4)} page ${h(c.usagePage, 4)} feature ${h(r.reportId)}: ${hex(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength))}`);
+        } catch (e) {
+          log(`READ ${h(d.productId, 4)} feature ${h(r.reportId)} failed: ${e.message}`, "warn");
+        }
+      }
+    }
+  }
+  if (!any) log("None of the connected entries has feature reports.");
+};
+
+$("copyBtn").onclick = async () => {
+  const list = await navigator.hid.getDevices();
+  const text = ["KEYBOARD LAB REPORT", ...list.map(describeDevice), "", "LOG:", $("log").innerText].join("\n");
+  try { await navigator.clipboard.writeText(text); log("Copied. Paste it into the chat."); }
+  catch (_) { log("Copy was blocked by the browser. Select the log text and press Ctrl+C."); }
+};
+$("clearBtn").onclick = () => { $("log").innerHTML = ""; };
+
+if ("hid" in navigator) {
+  navigator.hid.addEventListener("disconnect", () => { log("A device was unplugged.", "warn"); render(); });
+  navigator.hid.addEventListener("connect", () => render());
+  render();
+  log("Ready. Click Connect.");
+}
+</script>
+</body>
+</html>
