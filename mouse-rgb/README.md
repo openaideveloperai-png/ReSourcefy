@@ -77,7 +77,7 @@ You can also do step 3 while using `gp4-diagnostic.html`, to confirm the browser
 
 ## GP4 mouse lab (Python, Windows): study the mouse yourself
 
-**Results so far (November 2026):** the GP4 **does** speak the A704F protocol. The volume test worked from `gp4_lab.py` on interface 1, feature report 7. The DPI button sends `06 f6 00` on press and `06 00 00` on release, the same message as the A704F. The Chrome diagnostic had failed, probably because it read the mouse's memory 60 ms after each command. Option 6 tests that directly, and the diagnostic page no longer reads back by default.
+**Results so far (November 2026):** the GP4 **does** speak the A704F protocol. The volume test worked from `gp4_lab.py` on interface 1, feature report 7. The DPI button sends `06 f6 00` on press and `06 00 00` on release, the same message as the A704F. The Chrome diagnostic had failed, probably because it read the mouse's memory 60 ms after each command. Option 6 later showed the read-back was not the cause; both ways worked from Python. The A704F lighting commands (`13 7f xx`) and the wheel flash (`11 02 09`) had no effect on the light, so option 7 searches for the GP4's lighting command.
 
 The diagnostic page showed the GP4 ignores the A704F commands **on the part of the mouse Chrome can see**. `gp4_lab.py` goes further: Python can also reach the mouse's main interface, which Chrome hides.
 
@@ -97,6 +97,7 @@ The diagnostic page showed the GP4 ignores the A704F commands **on the part of t
 | 3 A704F volume test | Tries the volume command on **every** part of the mouse, including the one Chrome hid. Asks before each, always restores scrolling | Low |
 | 5 Lighting controls | Breathing speeds, static, off, wheel-triggered flashes, freeze-on-a-colour | Low; scrolling is always restored after flashes |
 | 6 Why did Chrome fail? | Volume test with and without an immediate read-back | Low |
+| 7 Search for the lighting command | Guided: sends lighting-style commands once per second while you watch the light; press Ctrl+C when it changes, then it pins down which one. Never sends DPI, button, fire-speed or key commands | Low (stage A) to moderate (stage B, undocumented commands); unplug/replug undoes |
 | 4 Careful probe | Sends undocumented commands one at a time, only when you press Enter. Records what you report (`l` = light changed, `o` = something else). Progress is saved | Moderate: changes last until you unplug/replug. Permanent changes are unlikely but not impossible |
 
 Do 1, 2 and 3 first. Send `gp4_lab_log.txt` back to continue the analysis. Only try 4 if 3 finds nothing and you accept the risk. In the probe, start with the first byte (position 1) and a template of all zeros, and watch the light after every step.

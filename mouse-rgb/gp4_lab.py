@@ -577,6 +577,107 @@ def readback_experiment():
         say("=> Neither worked this time. Unplug and replug the mouse, then try option 3 again.")
 
 
+# ---------------------------------------------------------------- 7. guided lighting search
+# A704F commands that are NOT lighting. They change DPI, buttons, scrolling, fire speed or
+# press keys, so the search never sends them.
+SKIP_CMDS = {0x09, 0x10, 0x11, 0x12, 0x15, 0x17}
+
+
+def wait_control(timeout=20):
+    end = time.time() + timeout
+    while time.time() < end:
+        for d in list_collections():
+            if d.get("usage_page") == 0xFF01:
+                try:
+                    return open_path(d["path"])
+                except Exception:
+                    pass
+        time.sleep(0.5)
+    say("Couldn't find the mouse. Plug it in and start option 7 again.")
+    return None
+
+
+def run_sequence(dev, packets, interval):
+    """Send packets one by one. Ctrl+C stops. Returns (index of last sent, stopped by user)."""
+    last = -1
+    try:
+        for i, (body, label) in enumerate(packets):
+            cmd(dev, body, f"[{i + 1}/{len(packets)}] {label}")
+            last = i
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        say("Stopped by you.")
+        return last, True
+    return last, False
+
+
+def confirm(dev, packets, last):
+    """Replay the last few packets one at a time to find the one that changed the light."""
+    cands = packets[max(0, last - 3):last + 1]
+    say("The change was caused by one of these: " + ", ".join(lbl for _, lbl in cands))
+    say("Now we test them one at a time.")
+    for body, label in reversed(cands):
+        ask("Unplug the mouse, plug it back in, wait until the light looks normal, then press Enter. ")
+        try:
+            dev.close()
+        except Exception:
+            pass
+        dev = wait_control()
+        if not dev:
+            return None
+        cmd(dev, body, f"test {label}")
+        if yes("Did the light change now?"):
+            what = ask("What did it do? ")
+            say(f"FOUND: {hx(bytes([7] + body))}  ->  {what}")
+            return dev
+    say("None of them did it on its own. Note what you saw and send the log.")
+    return dev
+
+
+def light_search():
+    say("\n=== GUIDED SEARCH FOR THE LIGHTING COMMAND ===")
+    say("Your mouse obeys the A704F scroll command but ignores its lighting command.")
+    say("This sends lighting-style commands one per second and you watch the light.")
+    say("THE MOMENT THE LIGHT CHANGES IN ANY WAY (off, colour, speed, freezes), PRESS Ctrl+C.")
+    say("It never sends DPI, button, fire-speed or key commands. Unplug/replug undoes everything.")
+    stage_a = [([0x13, b, 0x17], f"13 {b:02x} 17") for b in range(256) if b != 0x7F]
+    cmds = [c for c in range(0x00, 0x30) if c not in SKIP_CMDS and c != 0x13]
+    stage_b = []
+    for c in cmds:
+        stage_b += [([c, 0x7F, 0x17], f"{c:02x} 7f 17"), ([c, 0x17], f"{c:02x} 17")]
+    stages = [("A", "the A704F lighting command (13) with a different second byte, about 4 minutes", stage_a, False),
+              ("B", "other command numbers with an 'off' value, about 1.5 minutes (unknown commands)", stage_b, True)]
+    dev = None
+    try:
+        for name, desc, packets, unknown in stages:
+            say(f"\n-- Stage {name}: {desc}")
+            if unknown:
+                say("These command numbers aren't documented, so they could do something unexpected.")
+                say("Any effect lasts only until you unplug the mouse.")
+            if not yes(f"Run stage {name}?"):
+                continue
+            ask("Unplug and replug the mouse so the light is normal, then press Enter. ")
+            dev = wait_control()
+            if not dev:
+                return
+            last, stopped = run_sequence(dev, packets, 1.0)
+            cmd(dev, [0x11, 0x00, 0x00], "normal scrolling (safety)")
+            if stopped and last >= 0:
+                dev = confirm(dev, packets, last)
+                if not dev:
+                    return
+                cmd(dev, [0x11, 0x00, 0x00], "normal scrolling (safety)")
+            elif not stopped:
+                say(f"Stage {name} finished. Did the light ever change? If not, that's useful to know too.")
+        say("\nSearch done. Send gp4_lab_log.txt so the results can be analysed.")
+    finally:
+        if dev:
+            try:
+                dev.close()
+            except Exception:
+                pass
+
+
 # ---------------------------------------------------------------- menu
 def main():
     say(f"\n===== GP4 mouse lab started {time.strftime('%Y-%m-%d')} =====")
@@ -588,6 +689,7 @@ def main():
   4) Careful probe                  (expert, experimental commands)
   5) Lighting controls              (the A704F lighting commands)
   6) Why did Chrome fail? test      (low risk, always restores scrolling)
+  7) Search for the lighting command (guided, you watch the light)
   q) Quit
 """)
         try:
@@ -601,6 +703,7 @@ def main():
             elif choice == "4": probe()
             elif choice == "5": lighting()
             elif choice == "6": readback_experiment()
+            elif choice == "7": light_search()
             elif choice == "q": break
         except KeyboardInterrupt:
             say("Stopped.")
