@@ -7,6 +7,7 @@ Files in this folder:
 | `gp4-diagnostic.html` | **Start here.** Checks whether your mouse understands the commands. |
 | `gp4-rgb.html` | Lighting controls. Only useful if the diagnostic's volume test works. |
 | `gp4_linux_test.py` | Fallback test you can run from a Linux live USB (explained below). |
+| `gp4_lab.py` + `run_gp4_lab.bat` | Windows program to study the mouse yourself (see "GP4 mouse lab"). |
 
 Nothing in these files changes DPI or button bindings. Every change goes away when you unplug the mouse.
 
@@ -73,6 +74,28 @@ This only helps if you can find Windows software that recognises your mouse. The
 Send these: the `.pcapng` file, plus your list of what you clicked and in what order. With that, the page can be updated to use your mouse's real commands, including real colour choice if the software offers it.
 
 You can also do step 3 while using `gp4-diagnostic.html`, to confirm the browser sends exactly `21 09 07 03 01 00 08 00` with data `07 11 01 00 00 00 00 00`.
+
+## GP4 mouse lab (Python, Windows): study the mouse yourself
+
+The diagnostic page showed the GP4 ignores the A704F commands **on the part of the mouse Chrome can see**. `gp4_lab.py` goes further: Python can also reach the mouse's main interface, which Chrome hides.
+
+**Is it safe?** It's one readable text file. It only talks to devices from vendor 0x18f8, never uses the internet, and only writes `gp4_lab_log.txt` (plus `gp4_lab_progress.json` for the probe). It needs one extra package, [hidapi](https://pypi.org/project/hidapi/), a widely used open-source USB library.
+
+**Setup (once)**
+1. Install Python from [python.org](https://www.python.org/downloads/). On the first installer screen, tick **Add python.exe to PATH**.
+2. Put `gp4_lab.py` and `run_gp4_lab.bat` in the same folder.
+3. Double-click `run_gp4_lab.bat`. The first time, it installs hidapi, then opens the menu.
+
+**The menu**
+
+| Option | What it does | Risk |
+| --- | --- | --- |
+| 1 Scan | Lists every part of the mouse, its report layout, firmware version, and what it currently holds | None, read-only |
+| 2 Watch | Shows live everything the mouse sends while you press DPI/side buttons, plus any change in stored settings. Ctrl+C stops | None, read-only |
+| 3 A704F volume test | Tries the volume command on **every** part of the mouse, including the one Chrome hid. Asks before each, always restores scrolling | Low |
+| 4 Careful probe | Sends undocumented commands one at a time, only when you press Enter. Records what you report (`l` = light changed, `o` = something else). Progress is saved | Moderate: changes last until you unplug/replug. Permanent changes are unlikely but not impossible |
+
+Do 1, 2 and 3 first. Send `gp4_lab_log.txt` back to continue the analysis. Only try 4 if 3 finds nothing and you accept the risk. In the probe, start with the first byte (position 1) and a template of all zeros, and watch the light after every step.
 
 ## Things these pages deliberately never send
 
