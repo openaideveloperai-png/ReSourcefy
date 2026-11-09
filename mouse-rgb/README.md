@@ -79,6 +79,8 @@ You can also do step 3 while using `gp4-diagnostic.html`, to confirm the browser
 
 **Results so far (November 2026):** the GP4 **does** speak the A704F protocol. The volume test worked from `gp4_lab.py` on interface 1, feature report 7. The DPI button sends `06 f6 00` on press and `06 00 00` on release, the same message as the A704F. The Chrome diagnostic had failed, probably because it read the mouse's memory 60 ms after each command. Option 6 later showed the read-back was not the cause; both ways worked from Python. The A704F lighting commands (`13 7f xx`) and the wheel flash (`11 02 09`) had no effect on the light, so option 7 searches for the GP4's lighting command.
 
+**Conclusion:** option 7 found nothing. Stage A tried all 255 second-byte values of command `13` and stage B tried 41 other command numbers; the light never reacted. The A704F's own firmware light effects (`11 02 08/09`, toggle and flash) also did nothing, even though the same `11` command controls the scroll wheel fine. The GP4's LED is almost certainly not controlled by the mouse's chip: most likely a self-cycling RGB LED that runs on its own. No software can change it.
+
 The diagnostic page showed the GP4 ignores the A704F commands **on the part of the mouse Chrome can see**. `gp4_lab.py` goes further: Python can also reach the mouse's main interface, which Chrome hides.
 
 **Is it safe?** It's one readable text file. It only talks to devices from vendor 0x18f8, never uses the internet, and only writes `gp4_lab_log.txt` (plus `gp4_lab_progress.json` for the probe). It needs one extra package, [hidapi](https://pypi.org/project/hidapi/), a widely used open-source USB library.
