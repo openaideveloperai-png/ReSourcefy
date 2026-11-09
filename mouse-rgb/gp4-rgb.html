@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GP4 Mouse Lighting</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5b6470; --line: #d9dde3;
+    --accent: #2f6fde; --accent-text: #ffffff; --ok: #1f8a4c; --warn: #b26a00; --bad: #c0392b;
+    --code-bg: #f0f2f5; --log-bg: #0f1419; --log-text: #d7dde4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a; --panel: #1a1f26; --text: #e6e9ee; --muted: #9aa4b1; --line: #2c333d;
+      --accent: #5b8ff0; --accent-text: #0b0e12; --ok: #4cc27f; --warn: #e3a33b; --bad: #ef6b5b;
+      --code-bg: #222831; --log-bg: #0a0d11; --log-text: #cfd6de;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a; --panel: #1a1f26; --text: #e6e9ee; --muted: #9aa4b1; --line: #2c333d;
+    --accent: #5b8ff0; --accent-text: #0b0e12; --ok: #4cc27f; --warn: #e3a33b; --bad: #ef6b5b;
+    --code-bg: #222831; --log-bg: #0a0d11; --log-text: #cfd6de;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
+  h1 { font-size: 1.5rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 6px; }
+  p { margin: 6px 0; }
+  .muted { color: var(--muted); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 14px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+  button { font: inherit; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); cursor: pointer; text-align: left; }
+  button small { display: block; color: var(--muted); font-size: .78rem; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; text-align: center; }
+  button.primary small { color: inherit; opacity: .8; }
+  button.safe { border-color: var(--ok); color: var(--ok); font-weight: 600; text-align: center; }
+  button.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .88em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  #status { font-weight: 600; }
+  select, input[type=range] { font: inherit; color: var(--text); background: var(--panel);
+                              border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; max-width: 100%; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 8px 0; }
+  .row > label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+  .row select { min-width: 0; max-width: 100%; }
+  label.check { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+  label.check input { margin-top: 4px; flex: none; }
+  #log { background: var(--log-bg); color: var(--log-text); border-radius: 8px; padding: 10px;
+         height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  .banner { border-left: 4px solid var(--warn); padding: 8px 12px; background: var(--code-bg); border-radius: 6px; margin: 10px 0; }
+  .banner.bad { border-left-color: var(--bad); }
+  #prompt { display: none; font-weight: 600; color: var(--warn); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>GP4 mouse lighting</h1>
+    <div><span id="status" class="muted">Not connected</span></div>
+  </header>
+  <p class="muted">Use this only after <b>gp4-diagnostic.html</b> showed that the volume test works. Settings last until you unplug the mouse or restart the PC.</p>
+  <div id="support"></div>
+
+  <section class="card">
+    <div class="row">
+      <button class="primary" id="connectBtn">Connect mouse</button>
+      <label id="pickWrap" style="display:none">Entry: <select id="pick"></select></label>
+      <button class="safe" id="restoreBtn" disabled>Restore normal scrolling</button>
+    </div>
+    <label class="check"><input type="checkbox" id="autoApply"> Re-apply my last lighting mode when the mouse is plugged back in (only while this page is open)</label>
+  </section>
+
+  <section class="card">
+    <h2>Lighting mode</h2>
+    <p class="muted">The colour cycle (red, purple, blue, magenta) is fixed in the mouse. You choose the speed, a still light, or off.</p>
+    <div class="grid" id="modes"></div>
+  </section>
+
+  <section class="card">
+    <h2>Freeze on a colour <span class="muted" style="font-weight:400">(experimental)</span></h2>
+    <p>Restarts the colour cycle, waits, then switches to <b>Static</b>. If "static" holds whatever colour is showing, adjust the wait to land on the colour you like. If the mouse always shows the same colour in static, this trick won't work on your mouse.</p>
+    <div class="row">
+      <label>Restart method:
+        <select id="freezeMethod">
+          <option value="speed">Re-send breathing speed (no wheel needed)</option>
+          <option value="0b">Wheel trigger: start from purple</option>
+          <option value="0c">Wheel trigger: start from blue</option>
+        </select>
+      </label>
+      <label>Speed:
+        <select id="freezeSpeed"></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Wait before freezing: <b id="delayOut">1.5</b> s
+        <input type="range" id="delay" min="0" max="12" step="0.1" value="1.5">
+      </label>
+      <button class="primary" id="freezeBtn" disabled>Restart &amp; freeze</button>
+    </div>
+    <p id="prompt"></p>
+  </section>
+
+  <section class="card">
+    <h2>Flash effects</h2>
+    <p>These turn the scroll wheel into a "flash" trigger for <b id="flashSecsOut">6</b> seconds. <b>Roll the wheel during that time</b> to see the effect. Normal scrolling comes back automatically afterwards.</p>
+    <div class="row"><label>Trigger window: <input type="range" id="flashSecs" min="3" max="15" step="1" value="6"></label></div>
+    <div class="grid" id="flashes"></div>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <div id="log" class="mono" role="log" aria-live="polite"></div>
+    <div class="row"><button id="copyBtn">Copy log</button><button id="clearBtn">Clear log</button></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const VENDOR = 0x18f8, RID = 7;
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const hex = (arr) => Array.from(arr, b => b.toString(16).padStart(2, "0")).join(" ");
+const h = (n, w = 2) => "0x" + n.toString(16).padStart(w, "0");
+
+const MODES = [
+  { code: 0x10, name: "Breathing: slow", note: "6 s per colour" },
+  { code: 0x11, name: "Breathing: slower", note: "5 s" },
+  { code: 0x12, name: "Breathing: medium", note: "4 s" },
+  { code: 0x13, name: "Breathing: fast", note: "3 s" },
+  { code: 0x14, name: "Breathing: faster", note: "2 s" },
+  { code: 0x15, name: "Breathing: very fast", note: "1 s" },
+  { code: 0x16, name: "Static", note: "light stays on" },
+  { code: 0x17, name: "Off", note: "LED off" },
+];
+// Wheel-triggered "debug" values from SPECS.md. 0d (spams the z key) is deliberately absent.
+const FLASHES = [
+  { code: 0x09, name: "Flash", color: "#e0e0e0" },
+  { code: 0x10, name: "Flash red", color: "#e5484d" },
+  { code: 0x12, name: "Flash blue", color: "#3e7bfa" },
+  { code: 0x13, name: "Flash magenta", color: "#d23fc2" },
+  { code: 0x11, name: "Blink off and on", color: "#888888" },
+  { code: 0x08, name: "Toggle LED on/off", color: "#888888" },
+];
+const SAFE_DEBUG = new Set([0x08, 0x09, 0x0b, 0x0c, 0x10, 0x11, 0x12, 0x13]);
+
+let dev = null, busy = false, scrollChanged = false, safetyTimer = null;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
+};
+
+function log(msg, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `${new Date().toLocaleTimeString([], { hour12: false })}  ${msg}`;
+  $("log").appendChild(line);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+if (!("hid" in navigator)) {
+  $("support").innerHTML = `<div class="banner bad"><b>This browser can't talk to USB devices (no WebHID).</b>
+  Open this file in <b>Google Chrome</b> or <b>Microsoft Edge</b> on a desktop computer (right-click the file, <b>Open with</b>).</div>`;
+  $("connectBtn").disabled = true;
+}
+
+// ---------- descriptor helpers ----------
+function featureSize(device, id) {
+  const walk = (cols) => {
+    for (const c of cols || []) {
+      for (const r of c.featureReports || []) if (r.reportId === id)
+        return Math.ceil(r.items.reduce((s, it) => s + it.reportSize * it.reportCount, 0) / 8);
+      const inner = walk(c.children); if (inner) return inner;
+    }
+    return null;
+  };
+  return walk(device.collections);
+}
+
+// ---------- connection ----------
+async function refresh() {
+  const list = (await navigator.hid.getDevices()).filter(d => d.vendorId === VENDOR && featureSize(d, RID));
+  const pick = $("pick");
+  pick.innerHTML = "";
+  list.forEach((d, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = `${i + 1}: ${d.productName} (${h(d.productId, 4)})`;
+    pick.appendChild(o);
+  });
+  $("pickWrap").style.display = list.length > 1 ? "" : "none";
+  if (dev && !list.includes(dev)) dev = null;
+  if (!dev && list.length) await use(list[0]);
+  if (dev) pick.value = list.indexOf(dev);
+  setConnected(!!dev);
+  return list;
+}
+async function use(d) {
+  dev = d;
+  try { if (!dev.opened) await dev.open(); }
+  catch (e) { log(`Could not open the mouse: ${e.message}`, "bad"); dev = null; setConnected(false); return; }
+  log(`Connected to "${dev.productName}" ${h(dev.vendorId, 4)}:${h(dev.productId, 4)}`);
+  setConnected(true);
+}
+$("pick").onchange = async () => {
+  const list = (await navigator.hid.getDevices()).filter(d => d.vendorId === VENDOR && featureSize(d, RID));
+  await use(list[+$("pick").value]);
+};
+function setConnected(on) {
+  $("status").textContent = on ? "Connected" : "Not connected";
+  $("status").className = on ? "ok" : "muted";
+  document.querySelectorAll("[data-needs-dev]").forEach(b => b.disabled = !on);
+  $("restoreBtn").disabled = !on;
+  $("freezeBtn").disabled = !on;
+}
+$("connectBtn").onclick = async () => {
+  try { await navigator.hid.requestDevice({ filters: [{ vendorId: VENDOR }] }); }
+  catch (e) { log(`Connect failed: ${e.message}`, "bad"); }
+  const list = await refresh();
+  if (!list.length) log("No entry with control report 7 was allowed. Click Connect again and pick the other USB OPTICAL MOUSE entry.", "warn");
+};
+
+// ---------- sending ----------
+async function send(data, label) {
+  if (!dev) { log("Connect the mouse first.", "bad"); return false; }
+  const [cmd, a, b] = data;
+  // Only lighting (13) and scroll (11) commands, and only known-safe debug values.
+  const allowed = (cmd === 0x13 && a === 0x7f && b >= 0x10 && b <= 0x17) ||
+                  (cmd === 0x11 && a === 0x00 && b === 0x00) ||
+                  (cmd === 0x11 && a === 0x02 && SAFE_DEBUG.has(b));
+  if (!allowed) { log(`Blocked unknown command ${hex(data)}`, "bad"); return false; }
+  const buf = new Uint8Array(featureSize(dev, RID));
+  buf.set(data.slice(0, buf.length));
+  try {
+    await dev.sendFeatureReport(RID, buf);
+    log(`OUT 07 ${hex(buf)}  ${label}`);
+    return true;
+  } catch (e) {
+    log(`OUT 07 ${hex(buf)}  FAILED: ${e.message}`, "bad");
+    return false;
+  }
+}
+async function restoreScroll() {
+  clearTimeout(safetyTimer);
+  const ok = await send([0x11, 0x00, 0x00], "normal scrolling");
+  if (ok) scrollChanged = false;
+  return ok;
+}
+function armSafety(seconds) {
+  scrollChanged = true;
+  clearTimeout(safetyTimer);
+  safetyTimer = setTimeout(restoreScroll, seconds * 1000);
+}
+$("restoreBtn").onclick = restoreScroll;
+window.addEventListener("beforeunload", () => {
+  if (scrollChanged && dev) { const b = new Uint8Array(featureSize(dev, RID)); b[0] = 0x11; dev.sendFeatureReport(RID, b).catch(() => {}); }
+});
+async function exclusive(fn) {
+  if (busy) { log("Still busy with the previous action. Wait a moment.", "warn"); return; }
+  busy = true;
+  try { await fn(); } finally { busy = false; }
+}
+
+// ---------- lighting modes ----------
+function markActive(code) {
+  document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("active", +b.dataset.code === code));
+}
+async function setMode(m) {
+  if (await send([0x13, 0x7f, m.code], m.name)) { store.set("gp4-mode", m.code); markActive(m.code); }
+}
+for (const m of MODES) {
+  const b = document.createElement("button");
+  b.dataset.code = m.code; b.dataset.needsDev = ""; b.disabled = true;
+  b.innerHTML = `${m.name}<small>${m.note}</small>`;
+  b.onclick = () => exclusive(() => setMode(m));
+  $("modes").appendChild(b);
+  if (m.code <= 0x15) {
+    const o = document.createElement("option"); o.value = m.code; o.textContent = m.name.replace("Breathing: ", "");
+    $("freezeSpeed").appendChild(o);
+  }
+}
+const saved = +store.get("gp4-mode");
+if (saved) markActive(saved);
+
+// ---------- freeze trick ----------
+$("delay").oninput = () => { $("delayOut").textContent = (+$("delay").value).toFixed(1); };
+$("freezeBtn").onclick = () => exclusive(async () => {
+  const method = $("freezeMethod").value;
+  const speed = +$("freezeSpeed").value;
+  const wait = +$("delay").value * 1000;
+  const prompt = $("prompt");
+  if (method === "speed") {
+    if (!await send([0x13, 0x7f, speed], "restart breathing")) return;
+  } else {
+    const code = parseInt(method, 16);
+    // Make sure the cycle is running at the chosen speed, then arm the wheel to restart it.
+    if (!await send([0x13, 0x7f, speed], "breathing speed")) return;
+    if (!await send([0x11, 0x02, code], code === 0x0b ? "wheel = restart from purple" : "wheel = restart from blue")) return;
+    armSafety(20);
+    prompt.style.display = "block";
+    prompt.textContent = "Roll the wheel ONE notch now…";
+    // Give the user time to roll, then restore scrolling. The wait starts after this.
+    await sleep(2500);
+    prompt.style.display = "none";
+    await restoreScroll();
+  }
+  prompt.style.display = "block";
+  prompt.textContent = `Freezing in ${(wait / 1000).toFixed(1)} s…`;
+  await sleep(wait);
+  prompt.style.display = "none";
+  if (await send([0x13, 0x7f, 0x16], "static (freeze)")) { store.set("gp4-mode", 0x16); markActive(0x16); }
+});
+
+// ---------- flashes ----------
+$("flashSecs").oninput = () => { $("flashSecsOut").textContent = $("flashSecs").value; };
+for (const f of FLASHES) {
+  const b = document.createElement("button");
+  b.dataset.needsDev = ""; b.disabled = true;
+  b.innerHTML = `<span class="dot" style="background:${f.color}"></span>${f.name}<small>roll wheel to trigger</small>`;
+  b.onclick = () => exclusive(async () => {
+    const secs = +$("flashSecs").value;
+    try {
+      if (!await send([0x11, 0x02, f.code], `wheel = ${f.name.toLowerCase()}`)) return;
+      armSafety(secs + 5);
+      const small = b.querySelector("small");
+      for (let left = secs; left > 0; left--) { small.textContent = `roll the wheel now (${left}s)`; await sleep(1000); }
+      small.textContent = "roll wheel to trigger";
+    } finally {
+      await restoreScroll();   // always give the wheel back
+    }
+  });
+  $("flashes").appendChild(b);
+}
+
+// ---------- auto re-apply ----------
+$("autoApply").checked = store.get("gp4-auto") === "1";
+$("autoApply").onchange = () => store.set("gp4-auto", $("autoApply").checked ? "1" : "0");
+
+// ---------- log buttons ----------
+$("copyBtn").onclick = async () => {
+  try { await navigator.clipboard.writeText($("log").innerText); log("Log copied."); }
+  catch (_) { log("Copy was blocked. Select the log text and press Ctrl+C."); }
+};
+$("clearBtn").onclick = () => { $("log").innerHTML = ""; };
+
+if ("hid" in navigator) {
+  navigator.hid.addEventListener("disconnect", (e) => {
+    if (e.device === dev) { dev = null; setConnected(false); log("Mouse unplugged.", "warn"); }
+  });
+  navigator.hid.addEventListener("connect", async () => {
+    await sleep(500);
+    await refresh();
+    const code = +store.get("gp4-mode");
+    if (dev && $("autoApply").checked && code) {
+      const m = MODES.find(x => x.code === code);
+      if (m) { log("Mouse plugged back in. Re-applying the last mode."); await exclusive(() => setMode(m)); }
+    }
+  });
+  refresh().then(() => log(dev ? "Ready." : "Click Connect mouse."));
+}
+</script>
+</body>
+</html>

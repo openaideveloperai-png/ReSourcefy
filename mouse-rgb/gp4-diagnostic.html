@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GP4 Mouse Diagnostic</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5b6470; --line: #d9dde3;
+    --accent: #2f6fde; --accent-text: #ffffff; --ok: #1f8a4c; --warn: #b26a00; --bad: #c0392b;
+    --code-bg: #f0f2f5; --log-bg: #0f1419; --log-text: #d7dde4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a; --panel: #1a1f26; --text: #e6e9ee; --muted: #9aa4b1; --line: #2c333d;
+      --accent: #5b8ff0; --accent-text: #0b0e12; --ok: #4cc27f; --warn: #e3a33b; --bad: #ef6b5b;
+      --code-bg: #222831; --log-bg: #0a0d11; --log-text: #cfd6de;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a; --panel: #1a1f26; --text: #e6e9ee; --muted: #9aa4b1; --line: #2c333d;
+    --accent: #5b8ff0; --accent-text: #0b0e12; --ok: #4cc27f; --warn: #e3a33b; --bad: #ef6b5b;
+    --code-bg: #222831; --log-bg: #0a0d11; --log-text: #cfd6de;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 8px; }
+  p { margin: 6px 0; }
+  .sub { color: var(--muted); margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 16px; margin: 14px 0; }
+  .step { display: inline-block; min-width: 26px; height: 26px; line-height: 26px; text-align: center;
+          border-radius: 13px; background: var(--accent); color: var(--accent-text);
+          font-weight: 600; margin-right: 8px; font-size: .9rem; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); cursor: pointer; margin: 4px 6px 4px 0; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.safe { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .9em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: .9rem; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tablewrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: .8rem; font-weight: 600;
+          border: 1px solid currentColor; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  .devcard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .devcard.chosen { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  #log { background: var(--log-bg); color: var(--log-text); border-radius: 8px; padding: 10px;
+         height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0; }
+  .banner { border-left: 4px solid var(--warn); padding: 8px 12px; background: var(--code-bg); border-radius: 6px; }
+  .banner.bad { border-left-color: var(--bad); }
+  #restoreBar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0; display: none; }
+  .verdict { font-size: 1.05rem; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>GP4 mouse diagnostic</h1>
+  <p class="sub">Checks whether your Gammec GP4 (USB 18f8:0f99) understands the Instant A704F commands. Nothing here changes DPI or buttons, and nothing is saved in the mouse. Unplugging the mouse undoes everything.</p>
+
+  <div id="support"></div>
+
+  <div id="restoreBar">
+    <button class="safe" id="restoreBtnTop">Restore normal scrolling now</button>
+    <span class="muted" id="restoreHint"></span>
+  </div>
+
+  <section class="card">
+    <h2><span class="step">1</span>Connect</h2>
+    <p>Click <b>Connect mouse</b>. Chrome opens a small list. Pick the entry named <b>USB OPTICAL MOUSE</b> (if there are several, pick any one and click <b>Connect</b>; you can add the others by clicking the button again). Every interface you allow is listed below.</p>
+    <button class="primary" id="connectBtn">Connect mouse</button>
+    <div id="devices"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">2</span>Read what the mouse holds right now</h2>
+    <p>Best done right after you unplug and replug the mouse, before sending anything. If it returns something other than zeros, that's a clue about the firmware. This only reads.</p>
+    <button id="readBtn" disabled>Read feature report 7</button>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">3</span>Press the mouse's buttons</h2>
+    <p>The page is now listening to this interface. Press the <b>DPI button</b> (usually behind the wheel), then each side button, one at a time. Watch the log.</p>
+    <p class="muted">On the A704F, this interface sends report <code>06</code> for the DPI button and report <code>02</code> for media keys. If you see <code>IN report 06 …</code> lines, your mouse has the same layout as the A704F. That is a good sign, but it doesn't prove the same commands work.</p>
+    <p>Input reports seen so far: <b id="inCount">0</b></p>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">4</span>The key test: volume scrolling</h2>
+    <p>This sends <code>07 11 01 00 00 00 00 00</code>, which on an A704F turns the scroll wheel into a volume knob.</p>
+    <ol>
+      <li>Click <b>Turn on volume scrolling</b>.</li>
+      <li>Move the pointer over this page and roll the wheel a few notches.</li>
+      <li>Watch for the Windows volume pop-up, or check whether the page still scrolls.</li>
+      <li>Answer below. Scrolling goes back to normal by itself after 30 seconds, or right away when you answer.</li>
+    </ol>
+    <button class="primary" id="volBtn" disabled>Turn on volume scrolling</button>
+    <div id="volAsk" style="display:none">
+      <p><b>Did rolling the wheel change the volume?</b> <span id="volCountdown" class="muted"></span></p>
+      <button id="volYes">Yes, the volume changed</button>
+      <button id="volNo">No, it still scrolled the page (or nothing happened)</button>
+    </div>
+    <p id="volAuto" class="ok" style="display:none">The page saw volume key reports coming from the mouse, so the command worked.</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">5</span>Lighting tests <span class="muted" style="font-weight:400">(only useful if step 4 worked)</span></h2>
+    <p><b>5a. Turn the LED off, then back on.</b> Sends <code>13 7f 17</code> (off). After 3 seconds it sends <code>13 7f 10</code> (slow breathing).</p>
+    <button id="ledOffBtn" disabled>Turn LED off for 3 seconds</button>
+    <p style="margin-top:12px"><b>5b. Flash test.</b> On the A704F the "debug" scroll values seem to fire <i>when you roll the wheel</i>, not when they are sent. This sends <code>11 02 09</code> (wheel = flash LED). <b>Roll the wheel during the 8-second countdown.</b> Normal scrolling comes back automatically afterwards.</p>
+    <button id="flashBtn" disabled>Flash test (roll the wheel during the countdown)</button>
+    <span id="flashCountdown" class="muted"></span>
+    <div style="margin-top:12px">
+      <p><b>What happened?</b></p>
+      <button data-led="off-ok">LED went off</button>
+      <button data-led="flash-ok">LED flashed when I rolled</button>
+      <button data-led="nothing">Nothing changed</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Result</h2>
+    <p class="verdict" id="verdict">No tests run yet.</p>
+    <p id="verdictMore" class="muted"></p>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <p class="muted"><code>OUT</code> = sent to the mouse. <code>READ</code> = read back afterwards. <code>IN</code> = the mouse sent something by itself.</p>
+    <div id="log" class="mono" role="log" aria-live="polite"></div>
+    <button id="copyBtn">Copy log</button>
+    <button id="clearBtn">Clear log</button>
+    <button class="safe" id="restoreBtn" disabled>Restore normal scrolling</button>
+  </section>
+</main>
+
+<script>
+"use strict";
+const VENDOR = 0x18f8;
+const RID = 7;                 // feature report ID used by the mouse
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const hex = (arr) => Array.from(arr, b => b.toString(16).padStart(2, "0")).join(" ");
+
+let dev = null;                // chosen HIDDevice
+let inCount = 0;
+let sawVolumeKey = false;
+let scrollChanged = false;     // true while the wheel is in a non-normal mode
+let restoreTimer = null;
+const results = {};
+
+// ---------- log ----------
+function log(msg, cls) {
+  const t = new Date().toLocaleTimeString([], { hour12: false });
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `${t}  ${msg}`;
+  $("log").appendChild(line);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+// ---------- support check ----------
+if (!("hid" in navigator)) {
+  $("support").innerHTML = `<div class="banner bad"><b>This browser can't talk to USB devices (no WebHID).</b>
+  Open this file in <b>Google Chrome</b> or <b>Microsoft Edge</b> on a desktop computer. Right-click the file, choose
+  <b>Open with</b>, then pick Chrome or Edge.</div>`;
+  $("connectBtn").disabled = true;
+}
+
+// ---------- descriptor helpers ----------
+function reportBytes(report) {
+  let bits = 0;
+  for (const item of report.items || []) bits += item.reportSize * item.reportCount;
+  return Math.ceil(bits / 8);
+}
+function flatCollections(cols, depth = 0, out = []) {
+  for (const c of cols || []) { out.push({ c, depth }); flatCollections(c.children, depth + 1, out); }
+  return out;
+}
+function featureSize(device, id) {
+  for (const { c } of flatCollections(device.collections))
+    for (const r of c.featureReports || []) if (r.reportId === id) return reportBytes(r);
+  return null;
+}
+const h = (n, w = 2) => "0x" + n.toString(16).padStart(w, "0");
+
+// ---------- device list ----------
+async function renderDevices() {
+  const list = (await navigator.hid.getDevices()).filter(d => d.vendorId === VENDOR);
+  const box = $("devices");
+  box.innerHTML = "";
+  if (!list.length) { box.innerHTML = `<p class="muted">No mouse connected yet.</p>`; return; }
+  list.forEach((d, i) => {
+    const card = document.createElement("div");
+    card.className = "devcard" + (d === dev ? " chosen" : "");
+    const f7 = featureSize(d, RID);
+    let rows = "";
+    for (const { c, depth } of flatCollections(d.collections)) {
+      const rep = (arr, kind) => (arr || []).map(r => `${kind} ID ${h(r.reportId)} (${reportBytes(r)} bytes)`);
+      const reps = [...rep(c.inputReports, "input"), ...rep(c.outputReports, "output"), ...rep(c.featureReports, "feature")];
+      rows += `<tr><td>${"&nbsp;&nbsp;".repeat(depth)}${h(c.usagePage, 4)}</td><td>${h(c.usage)}</td>
+               <td>${reps.join("<br>") || '<span class="muted">none</span>'}</td></tr>`;
+    }
+    card.innerHTML = `<b>Entry ${i + 1}: ${d.productName || "(no name)"}</b>
+      <span class="mono muted">${h(d.vendorId, 4)}:${h(d.productId, 4)}</span>
+      ${f7 ? `<span class="pill ok">has control report 7 (${f7} data bytes)</span>` : `<span class="pill muted">no report 7</span>`}
+      <div class="tablewrap"><table><tr><th>Usage page</th><th>Usage</th><th>Reports</th></tr>${rows}</table></div>`;
+    const b = document.createElement("button");
+    b.textContent = d === dev ? "In use" : "Use this entry";
+    b.disabled = d === dev;
+    b.onclick = () => choose(d);
+    card.appendChild(b);
+    box.appendChild(card);
+  });
+  if (!dev) {
+    const best = list.find(d => featureSize(d, RID));
+    if (best) await choose(best);
+  }
+}
+
+async function choose(d) {
+  if (dev && dev !== d) dev.removeEventListener("inputreport", onInput);
+  dev = d;
+  try {
+    if (!dev.opened) await dev.open();
+  } catch (e) {
+    log(`Could not open this entry: ${e.message}`, "bad");
+    log("Close any other tab or program that uses the mouse settings, then try again.", "bad");
+  }
+  dev.addEventListener("inputreport", onInput);
+  const size = featureSize(dev, RID);
+  log(`Using "${dev.productName}" ${h(dev.vendorId, 4)}:${h(dev.productId, 4)}. Feature report 7: ${size ?? "missing"} data bytes.`);
+  for (const id of ["readBtn", "volBtn", "ledOffBtn", "flashBtn", "restoreBtn"]) $(id).disabled = !size;
+  if (!size) log("This entry has no feature report 7. Pick a different entry above.", "bad");
+  renderDevices();
+}
+
+function onInput(e) {
+  const bytes = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+  inCount++;
+  $("inCount").textContent = inCount;
+  let note = "";
+  if (e.reportId === 2 && bytes.length >= 2) {
+    const usage = bytes[0] | (bytes[1] << 8);
+    const names = { 0xe9: "Volume +", 0xea: "Volume -", 0xe2: "Mute", 0xcd: "Play/Pause" };
+    if (names[usage]) { note = `  (${names[usage]})`; if (usage === 0xe9 || usage === 0xea) onVolumeKey(); }
+  }
+  if (e.reportId === 6) note = "  (A704F-style button report)";
+  log(`IN   report ${e.reportId.toString(16).padStart(2, "0")}: ${hex(bytes)}${note}`);
+}
+
+// ---------- sending ----------
+// Only scroll (0x11) and lighting (0x13) commands are allowed on this page.
+async function send(data, label) {
+  if (!dev) { log("Connect the mouse first.", "bad"); return false; }
+  const size = featureSize(dev, RID);
+  const cmd = data[0];
+  if (cmd !== 0x11 && cmd !== 0x13) { log(`Blocked: command ${h(cmd)} is not allowed on this page.`, "bad"); return false; }
+  if (cmd === 0x11 && data[1] === 0x02 && data[2] === 0x0d) { log("Blocked: debug value 0d spams the z key.", "bad"); return false; }
+  const buf = new Uint8Array(size);
+  buf.set(data.slice(0, size));
+  try {
+    await dev.sendFeatureReport(RID, buf);
+    log(`OUT  07 ${hex(buf)}   ${label || ""}`);
+  } catch (e) {
+    log(`OUT  07 ${hex(buf)}   FAILED: ${e.message}`, "bad");
+    return false;
+  }
+  await sleep(60);
+  await readBack(buf);
+  return true;
+}
+
+async function readBack(expected) {
+  try {
+    const dv = await dev.receiveFeatureReport(RID);
+    const got = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+    let note = "";
+    if (expected) {
+      const tail = got.length === expected.length + 1 ? got.slice(1) : got;
+      note = hex(tail) === hex(expected) ? "  (same as sent)" : "  (DIFFERENT from what was sent)";
+    }
+    log(`READ ${hex(got)}${note}`);
+    return got;
+  } catch (e) {
+    log(`READ failed: ${e.message}`, "bad");
+    return null;
+  }
+}
+
+// ---------- scroll restore safety ----------
+function markScrollChanged(seconds, hintText) {
+  scrollChanged = true;
+  $("restoreBar").style.display = "block";
+  $("restoreHint").textContent = hintText || "";
+  clearTimeout(restoreTimer);
+  restoreTimer = setTimeout(restoreScroll, seconds * 1000);
+}
+async function restoreScroll() {
+  clearTimeout(restoreTimer);
+  await send([0x11, 0x00, 0x00], "normal scrolling");
+  scrollChanged = false;
+  $("restoreBar").style.display = "none";
+}
+$("restoreBtn").onclick = restoreScroll;
+$("restoreBtnTop").onclick = restoreScroll;
+window.addEventListener("beforeunload", () => {
+  // Best effort: put the wheel back to normal scrolling if the tab is closed mid-test.
+  if (scrollChanged && dev) {
+    const b = new Uint8Array(featureSize(dev, RID)); b[0] = 0x11;
+    dev.sendFeatureReport(RID, b).catch(() => {});
+  }
+});
+
+function countdown(el, seconds, done) {
+  let left = seconds;
+  el.textContent = `(${left}s)`;
+  const t = setInterval(() => {
+    left--;
+    el.textContent = left > 0 ? `(${left}s)` : "";
+    if (left <= 0) { clearInterval(t); done && done(); }
+  }, 1000);
+  return () => { clearInterval(t); el.textContent = ""; };
+}
+
+// ---------- tests ----------
+$("connectBtn").onclick = async () => {
+  try {
+    const picked = await navigator.hid.requestDevice({ filters: [{ vendorId: VENDOR }] });
+    if (!picked.length) log("Nothing was picked.");
+    for (const d of picked) log(`Allowed: "${d.productName}" ${h(d.vendorId, 4)}:${h(d.productId, 4)}`);
+  } catch (e) { log(`Connect failed: ${e.message}`, "bad"); }
+  renderDevices();
+};
+
+$("readBtn").onclick = () => readBack(null);
+
+let stopVolCountdown = null;
+$("volBtn").onclick = async () => {
+  sawVolumeKey = false;
+  $("volAuto").style.display = "none";
+  const ok = await send([0x11, 0x01, 0x00], "volume scrolling");
+  if (!ok) return;
+  markScrollChanged(30, "The wheel may be in volume mode. It switches back by itself after 30 seconds.");
+  $("volAsk").style.display = "block";
+  stopVolCountdown = countdown($("volCountdown"), 30, () => { $("volAsk").style.display = "none"; });
+};
+function onVolumeKey() {
+  if (sawVolumeKey) return;
+  sawVolumeKey = true;
+  $("volAuto").style.display = "block";
+  results.volume = true;
+  updateVerdict();
+}
+async function answerVolume(yes) {
+  results.volume = yes || sawVolumeKey;
+  $("volAsk").style.display = "none";
+  if (stopVolCountdown) stopVolCountdown();
+  log(`You answered: volume ${yes ? "DID" : "did NOT"} change.`);
+  await restoreScroll();
+  updateVerdict();
+}
+$("volYes").onclick = () => answerVolume(true);
+$("volNo").onclick = () => answerVolume(false);
+
+$("ledOffBtn").onclick = async () => {
+  $("ledOffBtn").disabled = true;
+  if (await send([0x13, 0x7f, 0x17], "LED off")) {
+    await sleep(3000);
+    await send([0x13, 0x7f, 0x10], "slow breathing (back on)");
+  }
+  $("ledOffBtn").disabled = false;
+};
+
+$("flashBtn").onclick = async () => {
+  $("flashBtn").disabled = true;
+  if (await send([0x11, 0x02, 0x09], "wheel = flash LED")) {
+    markScrollChanged(12, "The wheel flashes the LED instead of scrolling. It switches back by itself.");
+    await new Promise(res => countdown($("flashCountdown"), 8, res));
+    await restoreScroll();
+  }
+  $("flashBtn").disabled = false;
+};
+
+document.querySelectorAll("[data-led]").forEach(b => b.onclick = () => {
+  results.led = b.dataset.led;
+  log(`You answered: ${b.textContent}`);
+  updateVerdict();
+});
+
+function updateVerdict() {
+  const v = $("verdict"), m = $("verdictMore");
+  if (results.volume === true) {
+    v.className = "verdict ok";
+    v.textContent = "Your mouse understands the A704F commands.";
+    m.textContent = results.led === "nothing"
+      ? "Scroll commands work but the lighting didn't react. The lighting may use a different command on the GP4. Copy the log and share it."
+      : "Open gp4-rgb.html to control the lighting.";
+  } else if (results.volume === false) {
+    v.className = "verdict bad";
+    v.textContent = "Your mouse ignored the A704F command.";
+    m.textContent = "The page sent the right bytes and the mouse accepted them, but did not act on them. A web page can't fix this. See the README for next steps (USB capture or the Linux live-USB test). Copy the log and keep it.";
+  } else {
+    v.className = "verdict";
+    v.textContent = "No tests run yet.";
+    m.textContent = "";
+  }
+}
+
+$("copyBtn").onclick = async () => {
+  const text = $("log").innerText;
+  try { await navigator.clipboard.writeText(text); log("Log copied to the clipboard."); }
+  catch (_) {
+    const r = document.createRange(); r.selectNodeContents($("log"));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    log("Copy was blocked. The log is selected; press Ctrl+C.");
+  }
+};
+$("clearBtn").onclick = () => { $("log").innerHTML = ""; };
+
+if ("hid" in navigator) {
+  navigator.hid.addEventListener("disconnect", (e) => {
+    if (e.device === dev) { dev = null; log("Mouse unplugged. Plug it back in and click Connect again.", "warn"); }
+    renderDevices();
+  });
+  navigator.hid.addEventListener("connect", () => renderDevices());
+  renderDevices();
+  log("Ready. Click Connect mouse.");
+}
+</script>
+</body>
+</html>
